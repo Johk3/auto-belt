@@ -27,7 +27,7 @@ end
 storage = {}
 game = {tick = 0}
 
-local FILES = {"cells", "heap", "refine", "layout", "grid"}
+local FILES = {"cells", "heap", "refine", "layout", "grid", "jobs"}
 for _, name in ipairs(FILES) do dofile("test/" .. name .. ".lua") end
 
 print(string.format("%d passed, %d failed", passed, failed))

@@ -1,6 +1,7 @@
 -- Builds cell readers from ASCII maps for the routing tests.
 local cells = require("scripts.cells")
 local refine = require("scripts.refine")
+local grid = require("scripts.grid")
 local bor, band = bit32.bor, bit32.band
 local fake = {}
 
@@ -83,6 +84,22 @@ function fake.lazy(cell)
     return cell(x, y)
   end
   return lazy_cell, function(cx, cy) loaded[cells.chunk_key(cx, cy)] = true end
+end
+
+-- Stores chunk records for a map that starts at tile 0, 0, plus one ring of
+-- chunks around it; tiles outside the rows are blocked walls.
+function fake.records(rows, surface_index)
+  local cell = fake.grid(rows)
+  local last_cx, last_cy = math.floor((#rows[1] - 1) / 32), math.floor((#rows - 1) / 32)
+  for cx = -1, last_cx + 1 do
+    for cy = -1, last_cy + 1 do
+      local out = {}
+      for ly = 0, 31 do for lx = 0, 31 do
+        out[#out + 1] = string.char(cell(cx * 32 + lx, cy * 32 + ly))
+      end end
+      grid.put(surface_index, cx, cy, table.concat(out))
+    end
+  end
 end
 
 return fake

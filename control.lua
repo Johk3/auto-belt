@@ -6,6 +6,11 @@ AUTO_BELT = {}
 AUTO_BELT.grid = grid
 AUTO_BELT.tiers = tiers
 AUTO_BELT.cells = require("scripts.cells")
+local scheduler = require("scripts.scheduler")
+AUTO_BELT.jobs = require("scripts.jobs")
+AUTO_BELT.endpoints = require("scripts.endpoints")
+AUTO_BELT.scheduler = scheduler
+AUTO_BELT.on_tick = scheduler.tick
 
 local function update_tick()
   local busy = next(storage.jobs or {}) ~= nil or next(storage.builds or {}) ~= nil
