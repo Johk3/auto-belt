@@ -84,8 +84,9 @@ run_case() {
   # Cases compare against __MOD_VERSION__, so a release needs no test edits.
   body="${body//__MOD_VERSION__/$(mod_version)}"
   # Combat tests need real engine ticks between assertions. WAIT is bounded
-  # and explicit; a timeout fails rather than silently skipping the case.
-  for attempt in $(seq 1 100); do
+  # (600 tries, about 60 s or 3600 ticks, for long routes) and explicit;
+  # a timeout fails rather than silently skipping the case.
+  for attempt in $(seq 1 600); do
     out="$(python3 "$ROOT/test/rcon.py" "/silent-command __auto-belt__ local ok, result = pcall(function() $body end) rcon.print(ok and (result or 'PASS') or ('FAIL: ' .. tostring(result)))")"
     if [[ "$out" != WAIT:* ]]; then break; fi
     sleep 0.1
