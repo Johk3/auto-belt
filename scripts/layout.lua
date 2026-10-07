@@ -38,10 +38,11 @@ function layout.validate(entities)
       local a = entities[open]
       pair_of[open], pair_of[i] = pair_count, pair_count
       local axis = a.d % 2
-      local x, y = a.x + DX[a.d], a.y + DY[a.d]
-      while x ~= e.x or y ~= e.y do
-        span[axis][tile_key(x, y)] = pair_count
-        x, y = x + DX[a.d], y + DY[a.d]
+      local dx, dy = e.x - a.x, e.y - a.y
+      local ahead = dx * DX[a.d] + dy * DY[a.d]
+      if ahead < 1 or math.abs(dx * DY[a.d] + dy * DX[a.d]) ~= 0 then return "loop" end
+      for step = 1, ahead - 1 do
+        span[axis][tile_key(a.x + DX[a.d] * step, a.y + DY[a.d] * step)] = pair_count
       end
       open = nil
     end

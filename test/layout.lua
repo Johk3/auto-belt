@@ -53,3 +53,33 @@ test("layout: a solved route converts without loops", function()
   local tiles = layout.tiles(e)
   check(tiles[require("scripts.cells").tile_key(9, 1)], "goal tile listed")
 end)
+
+local function pair(x1, y1, x2, y2, d)
+  return {{name = "underground-belt", kind = "input", x = x1, y = y1, d = d},
+          {name = "underground-belt", kind = "output", x = x2, y = y2, d = d}}
+end
+
+test("layout: an output behind its input is rejected", function()
+  equal(layout.validate(pair(5, 0, 2, 0, 1)), "loop")
+end)
+
+test("layout: an output off the input's axis is rejected", function()
+  equal(layout.validate(pair(0, 0, 4, 1, 1)), "loop")
+end)
+
+test("layout: an output on the input's tile is rejected", function()
+  local e = pair(0, 0, 0, 0, 1)
+  equal(layout.validate(e), "loop")
+end)
+
+test("layout: two paired jumps with overlapping spans are rejected", function()
+  local e = pair(0, 0, 6, 0, 1)
+  for _, x in ipairs(pair(3, 0, 9, 0, 1)) do e[#e + 1] = x end
+  equal(layout.validate(e), "loop")
+end)
+
+test("layout: a perpendicular jump may cross under another span", function()
+  local e = pair(0, 0, 6, 0, 1)
+  for _, x in ipairs(pair(3, -2, 3, 2, 2)) do e[#e + 1] = x end
+  equal(layout.validate(e), nil)
+end)
