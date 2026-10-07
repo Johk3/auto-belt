@@ -49,20 +49,21 @@ function heap.pop(h)
   while true do
     local left = i * 2
     local right = left + 1
-    local smallest = i
+    if left > h.n then break end
 
-    if left <= h.n and h.keys[left] < last_key then
-      smallest = left
+    -- Find the smaller child
+    local child = left
+    if right <= h.n and h.keys[right] < h.keys[left] then
+      child = right
     end
-    if right <= h.n and h.keys[right] < h.keys[smallest] then
-      smallest = right
-    end
 
-    if smallest == i then break end
+    -- If child >= last_key, heap property is satisfied
+    if h.keys[child] >= last_key then break end
 
-    h.keys[i] = h.keys[smallest]
-    h.vals[i] = h.vals[smallest]
-    i = smallest
+    -- Move child up
+    h.keys[i] = h.keys[child]
+    h.vals[i] = h.vals[child]
+    i = child
   end
   h.keys[i] = last_key
   h.vals[i] = last_val

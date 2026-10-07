@@ -19,3 +19,41 @@ test("heap: large keys keep their order", function()
   local _, v = heap.pop(h); equal(v, "a")
   _, v = heap.pop(h); equal(v, "b")
 end)
+
+test("heap: random interleaved operations maintain min-heap order", function()
+  -- Deterministic random generator for reproducibility
+  local lcg_state = 12345
+  local function lcg() lcg_state = (lcg_state * 1103515245 + 12345) % 2147483648; return lcg_state end
+
+  local h = heap.new()
+
+  -- Push 200 keys with duplicates
+  for i = 1, 200 do
+    local k = lcg() % 100
+    heap.push(h, k, "v" .. i)
+  end
+
+  -- Interleave pushes and pops
+  for i = 1, 50 do
+    local k = lcg() % 100
+    heap.push(h, k, "e" .. i)
+    if heap.size(h) > 0 then
+      heap.pop(h)
+    end
+  end
+
+  -- Drain and verify sorted order
+  local prev = nil
+  while heap.size(h) > 0 do
+    local k = heap.pop(h)
+    if prev ~= nil then
+      check(k >= prev, "out of order: " .. k .. " < " .. prev)
+    end
+    prev = k
+  end
+
+  -- Verify empty
+  equal(heap.size(h), 0)
+  equal(heap.pop(h), nil)
+  equal(heap.peek(h), nil)
+end)
