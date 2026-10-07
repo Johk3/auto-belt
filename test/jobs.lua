@@ -165,12 +165,20 @@ test("jobs: long routes refine with weight 12", function()
   check(job.search.region.chunks ~= nil, "refine is limited to a corridor")
 end)
 
+local function count(set)
+  local n = 0
+  for _ in pairs(set) do n = n + 1 end
+  return n
+end
+
 test("jobs: refine failure in ring 1 retries once in ring 2", function()
   fresh(wide(200, 32))
   local real_step = refine.step
   local calls = 0
+  local corridors = {}
   refine.step = function(search, budget, cell)
     calls = calls + 1
+    if search ~= corridors[#corridors] then corridors[#corridors + 1] = search end
     if calls == 1 then search.status = "failed"; search.closest = {x = 1, y = 5, h = 0}; return "failed", 1 end
     return real_step(search, budget, cell)
   end
@@ -179,6 +187,9 @@ test("jobs: refine failure in ring 1 retries once in ring 2", function()
   refine.step = real_step
   if not ok then error(err) end
   equal(job.ring, 2); equal(job.stage, "ready")
+  equal(#corridors, 2, "one refine per ring")
+  local ring1, ring2 = count(corridors[1].region.chunks), count(corridors[2].region.chunks)
+  check(ring2 > ring1, "ring 2 widens the corridor: " .. ring1 .. " then " .. ring2 .. " chunks")
 end)
 
 test("jobs: refine failure in ring 2 is no-route with the closest tile", function()
