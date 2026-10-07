@@ -4,7 +4,8 @@ local endpoints = require("scripts.endpoints")
 local jobs = require("scripts.jobs")
 local builder = require("scripts.builder")
 local layout = require("scripts.layout")
-require("scripts.grid")
+local grid = require("scripts.grid")
+local fake = require("test.fake_grid")
 require("scripts.tiers")
 require("scripts.scheduler")
 require("scripts.cells")
@@ -132,26 +133,121 @@ test("planner: a failed job shows its message and a marker, then goes away", fun
   equal(#storage.players[1].markers, 1)
 end)
 
-test("planner: a blocked build allows one reroute click at the stop tile", function()
-  local player = setup()
-  planner.on_build_done({player_index = 1, surface_index = 1, blocked = {x = 6, y = 4}, last = {x = 5, y = 4},
-    goal = {x = 9, y = 4, headings = ALL, place = true}, starts = {{x = 3, y = 4, d = 1}}, tier = TIER})
-  check(said(player, "auto-belt.blocked"), "blocked message")
-  local reroute = storage.players[1].reroute
-  equal(reroute.tile.x, 6)
-  planner.on_select(click(6.5, 4.5))
-  equal(count(storage.jobs), 1)
-  equal(storage.players[1].reroute, nil)
-  equal(storage.players[1].start, nil)
+local function belt(x, y, d, kind)
+  return {name = kind and "underground-belt" or "transport-belt", kind = kind or "belt", x = x, y = y, d = d}
+end
+
+-- A map of rows ("." free, "#" blocked) behind a surface whose entities can be
+-- found by tile and destroyed; chunk reads come from the current rows.
+local function fake_map(rows, placed)
+  local surface = {index = 1, name = "nauvis", destroyed = {}}
+  local function set(x, y, c) rows[y + 1] = rows[y + 1]:sub(1, x) .. c .. rows[y + 1]:sub(x + 2) end
+  for _, e in ipairs(placed) do
+    e.valid = true
+    set(e.x, e.y, "#")
+    e.destroy = function(args)
+      e.valid = false
+      set(e.x, e.y, ".")
+      surface.destroyed[#surface.destroyed + 1] = {x = e.x, y = e.y, raise = args and args.raise_destroy}
+    end
+  end
+  surface.find_entities_filtered = function(f)
+    local x, y = math.floor(f.area[1][1]), math.floor(f.area[1][2])
+    for _, e in ipairs(placed) do
+      local name = e.ghost and f.ghost_name or (not e.ghost and f.name)
+      if e.valid and e.x == x and e.y == y and e.name == name then return {e} end
+    end
+    return {}
+  end
+  fake.records(rows, 1)
+  local saved = grid.read_chunk
+  grid.read_chunk = function() fake.records(rows, 1) end
+  return surface, function() grid.read_chunk = saved end
+end
+
+local function blocked_build(entities, next_index, starts)
+  return {player_index = 1, surface_index = 1, force = "player", placement = "ghost", layout = "belts",
+    blocked = {x = entities[next_index].x, y = entities[next_index].y}, entities = entities, next = next_index,
+    last = next_index > 1 and {x = entities[next_index - 1].x, y = entities[next_index - 1].y} or nil,
+    goal = {x = 9, y = 6, headings = ALL, place = true}, starts = starts or {{x = 3, y = 4, d = 1}}, tier = TIER}
+end
+
+test("planner: reroute backs off the last belt and enters it with the previous heading", function()
+  local r = planner.reroute_record(blocked_build({belt(3, 4, 1), belt(4, 4, 2), belt(4, 5, 1), belt(5, 5, 1)}, 4))
+  equal(#r.back, 1)
+  equal(r.back[1].x, 4); equal(r.back[1].y, 5); equal(r.back[1].name, "transport-belt")
+  equal(r.start.x, 4); equal(r.start.y, 5); equal(r.start.d, 2)
 end)
 
-test("planner: a reroute without a last entity reuses the build's starts", function()
-  setup()
-  endpoints.start = function() error("must not read the map") end
-  planner.on_build_done({player_index = 1, surface_index = 1, blocked = {x = 3, y = 4},
-    goal = {x = 9, y = 4, headings = ALL, place = true}, starts = {{x = 3, y = 4, d = 1}}, tier = TIER})
-  planner.on_select(click(3.5, 4.5))
-  equal(count(storage.jobs), 1)
+test("planner: reroute after an underground output enters the next tile with its heading", function()
+  local r = planner.reroute_record(blocked_build({belt(3, 4, 1, "input"), belt(6, 4, 1, "output"),
+    belt(7, 4, 0), belt(7, 3, 0)}, 4))
+  equal(#r.back, 1)
+  equal(r.back[1].x, 7)
+  equal(r.start.x, 7); equal(r.start.y, 4); equal(r.start.d, 1)
+end)
+
+test("planner: reroute with an output last backs off the whole underground pair", function()
+  local r = planner.reroute_record(blocked_build({belt(2, 4, 1), belt(3, 4, 1, "input"),
+    belt(6, 4, 1, "output"), belt(7, 4, 1)}, 4))
+  equal(#r.back, 2)
+  equal(r.back[1].x, 3); equal(r.back[2].x, 6)
+  equal(r.start.x, 3); equal(r.start.y, 4); equal(r.start.d, 1)
+end)
+
+test("planner: reroute after only the first entity uses the build's starts", function()
+  local r = planner.reroute_record(blocked_build({belt(3, 4, 1), belt(4, 4, 1)}, 2))
+  equal(#r.back, 1)
+  equal(r.start, nil)
+  equal(#r.starts, 1); equal(r.starts[1].x, 3); equal(r.starts[1].d, 1)
+end)
+
+test("planner: a reroute click removes the backed-off entity and routes from its tile", function()
+  local player = setup()
+  local entities = {belt(3, 4, 1), belt(4, 4, 2), belt(4, 5, 1), belt(5, 5, 1)}
+  local placed = {{x = 3, y = 4, name = "transport-belt"}, {x = 4, y = 4, name = "transport-belt"},
+    {x = 4, y = 5, name = "transport-belt", ghost = true}, {x = 5, y = 5, name = "wooden-chest"}}
+  local surface, restore = fake_map({"............", "............", "............", "............",
+    "............", "............", "............", "............"}, placed)
+  player.surface = surface
+  local ok, err = pcall(function()
+    planner.on_build_done(blocked_build(entities, 4))
+    check(said(player, "auto-belt.blocked"), "blocked message")
+    equal(storage.players[1].reroute.tile.x, 5)
+    planner.on_select(click(5.5, 5.5))
+    equal(#surface.destroyed, 1)
+    equal(surface.destroyed[1].x, 4); equal(surface.destroyed[1].y, 5)
+    equal(surface.destroyed[1].raise, true)
+    equal(count(storage.jobs), 1)
+    local _, job = next(storage.jobs)
+    equal(#job.starts, 1)
+    equal(job.starts[1].x, 4); equal(job.starts[1].y, 5); equal(job.starts[1].d, 2)
+    equal(job.placement, "ghost"); equal(job.force, "player")
+    equal(storage.players[1].reroute, nil)
+    equal(storage.players[1].start, nil)
+  end)
+  restore()
+  check(ok, err)
+end)
+
+test("planner: a reroute with nothing placed keeps only the free starts", function()
+  local player = setup()
+  local surface, restore = fake_map({"..........", "....#.....", ".........."}, {})
+  player.surface = surface
+  local ok, err = pcall(function()
+    local build = blocked_build({belt(3, 1, 1), belt(4, 1, 1)}, 1, {{x = 3, y = 1, d = 1}, {x = 4, y = 1, d = 1}})
+    local job, error_key = planner.reroute_job(planner.reroute_record(build), surface, 1)
+    equal(error_key, nil)
+    equal(#job.starts, 1); equal(job.starts[1].x, 3)
+    build = blocked_build({belt(4, 1, 1)}, 1, {{x = 4, y = 1, d = 1}})
+    planner.on_build_done(build)
+    planner.on_select(click(4.5, 1.5))
+    check(said(player, "auto-belt.start-blocked"), "start-blocked message")
+    equal(storage.players[1].reroute, nil)
+    equal(count(storage.jobs), 1)
+  end)
+  restore()
+  check(ok, err)
 end)
 
 test("planner: a finished build says so", function()

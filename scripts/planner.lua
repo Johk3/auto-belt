@@ -5,6 +5,7 @@ local endpoints = require("scripts.endpoints")
 local jobs = require("scripts.jobs")
 local builder = require("scripts.builder")
 local cells = require("scripts.cells")
+local grid = require("scripts.grid")
 
 local planner = {}
 
@@ -83,16 +84,61 @@ function planner.build(player)
   refresh(player)
 end
 
-local function start_job(player, p, surface_index, starts, tier, goal)
-  drop_job(p)
-  clear_markers(p)
-  local job = jobs.create{surface_index = surface_index, force = player.force, player_index = player.index,
-    starts = starts, goal = goal, tier = tier, layout = p.layout, placement = p.placement}
+local function show_job(player, p, job)
   p.job_id = job.id
   p.start, p.reroute = nil, nil
   say(player, "auto-belt.routing")
-  if p.layout == "undergrounds" and not tier.underground then say(player, "auto-belt.no-underground") end
+  if job.layout == "undergrounds" and not job.tier.underground then say(player, "auto-belt.no-underground") end
   refresh(player)
+end
+
+local function start_job(player, p, surface_index, starts, tier, goal)
+  drop_job(p)
+  clear_markers(p)
+  show_job(player, p, jobs.create{surface_index = surface_index, force = player.force, player_index = player.index,
+    starts = starts, goal = goal, tier = tier, layout = p.layout, placement = p.placement})
+end
+
+-- What a reroute needs from a blocked build, as plain data. The route backs off
+-- one step: the last placed entity, or the whole underground pair when that
+-- entity is an output. The new start is the first backed-off tile, entered with
+-- the heading of the entity before it; with nothing before it, the build's starts.
+function planner.reroute_record(build)
+  local list, n = build.entities, (build.next or 1) - 1
+  local back, start = {}, nil
+  if list and n >= 1 then
+    local k = n
+    if list[k].kind == "output" and k > 1 then k = k - 1 end
+    for i = k, n do back[#back + 1] = {x = list[i].x, y = list[i].y, name = list[i].name} end
+    local prev = list[k - 1]
+    if prev then start = {x = list[k].x, y = list[k].y, d = prev.d} end
+  end
+  local starts = {}
+  for i, st in ipairs(build.starts or {}) do starts[i] = {x = st.x, y = st.y, d = st.d} end
+  return {tile = {x = build.blocked.x, y = build.blocked.y}, surface_index = build.surface_index,
+    back = back, start = start, starts = starts, goal = build.goal, tier = build.tier,
+    layout = build.layout, placement = build.placement, force = build.force}
+end
+
+local function remove_placed(surface, force, e)
+  local area = {{e.x + 0.1, e.y + 0.1}, {e.x + 0.9, e.y + 0.9}}
+  local found = surface.find_entities_filtered{area = area, name = e.name, force = force}[1]
+    or surface.find_entities_filtered{area = area, ghost_name = e.name, force = force}[1]
+  if found then found.destroy{raise_destroy = true} end
+end
+
+-- Clears the backed-off entities and starts a new job from the record's start
+-- tile. Returns the job, or nil and an error key.
+function planner.reroute_job(r, surface, player_index)
+  grid.invalidate_box(surface.index, r.tile.x, r.tile.y, r.tile.x, r.tile.y)
+  for _, e in ipairs(r.back or {}) do remove_placed(surface, r.force, e) end
+  local starts = {}
+  for _, st in ipairs(r.start and {r.start} or r.starts or {}) do
+    if not cells.has(grid.ensure(surface, st.x, st.y), cells.BLOCKED) then starts[#starts + 1] = st end
+  end
+  if #starts == 0 then return nil, "auto-belt.start-blocked" end
+  return jobs.create{surface_index = surface.index, force = r.force, player_index = player_index,
+    starts = starts, goal = r.goal, tier = r.tier, layout = r.layout, placement = r.placement}
 end
 
 function planner.on_select(event)
@@ -112,14 +158,18 @@ function planner.on_select(event)
 
   local r = p.reroute
   if r and r.tile.x == x and r.tile.y == y and r.surface_index == surface.index then
-    local found
-    if r.last then
-      found = endpoints.start(surface, {x = r.last.x + 0.5, y = r.last.y + 0.5}, p.tier)
-    else
-      found = {starts = r.starts, tier = r.tier}
+    r.force = r.force or player.force.name
+    r.layout, r.placement = r.layout or p.layout, r.placement or p.placement
+    drop_job(p)
+    clear_markers(p)
+    local job, error_key = planner.reroute_job(r, surface, player.index)
+    if not job then
+      p.reroute = nil
+      say(player, error_key)
+      refresh(player)
+      return
     end
-    if found.error then say(player, found.error); return end
-    return start_job(player, p, surface.index, found.starts, found.tier, r.goal)
+    return show_job(player, p, job)
   end
 
   if not p.start then
@@ -190,8 +240,7 @@ function planner.on_build_done(build)
   if build.blocked then
     say(player, "auto-belt.blocked", build.blocked.x, build.blocked.y)
     mark(player, p, build.surface_index, build.blocked.x, build.blocked.y)
-    p.reroute = {tile = {x = build.blocked.x, y = build.blocked.y}, last = build.last, goal = build.goal,
-      starts = build.starts, tier = build.tier, surface_index = build.surface_index}
+    p.reroute = planner.reroute_record(build)
   else
     say(player, "auto-belt.built")
   end
