@@ -2,6 +2,7 @@
 local cells = require("scripts.cells")
 local refine = require("scripts.refine")
 local grid = require("scripts.grid")
+local regions = require("scripts.regions")
 local bor, band = bit32.bor, bit32.band
 local fake = {}
 
@@ -99,6 +100,24 @@ function fake.records(rows, surface_index)
       end end
       grid.put(surface_index, cx, cy, table.concat(out))
     end
+  end
+end
+
+-- Region reader over a map that starts at tile 0, 0; chunks outside the rows
+-- are all wall. Records are built on first use.
+function fake.region_reader(rows)
+  local cell = fake.grid(rows)
+  local cache = {}
+  return function(cx, cy)
+    local key = cells.chunk_key(cx, cy)
+    if not cache[key] then
+      local out = {}
+      for ly = 0, 31 do for lx = 0, 31 do
+        out[#out + 1] = string.char(cell(cx * 32 + lx, cy * 32 + ly))
+      end end
+      cache[key] = regions.build(table.concat(out))
+    end
+    return cache[key]
   end
 end
 

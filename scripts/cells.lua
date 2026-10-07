@@ -36,5 +36,9 @@ end
 
 function cells.chunk_of(x, y) return math.floor(x / 32), math.floor(y / 32) end
 function cells.chunk_key(cx, cy) return (cx + 32768) * 65536 + (cy + 32768) end
+function cells.chunk_xy(key)
+  local y = key % 65536
+  return (key - y) / 65536 - 32768, y - 32768
+end
 
 return cells
