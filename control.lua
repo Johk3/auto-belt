@@ -1,5 +1,11 @@
 -- Runtime entry: event wiring only. Game logic lives in scripts/.
+local grid = require("scripts.grid")
+local tiers = require("scripts.tiers")
+
 AUTO_BELT = {}
+AUTO_BELT.grid = grid
+AUTO_BELT.tiers = tiers
+AUTO_BELT.cells = require("scripts.cells")
 
 local function update_tick()
   local busy = next(storage.jobs or {}) ~= nil or next(storage.builds or {}) ~= nil
@@ -17,3 +23,27 @@ end
 script.on_init(function() setup(); update_tick() end)
 script.on_configuration_changed(function() setup(); update_tick() end)
 script.on_load(function() update_tick() end)
+
+-- Grid invalidation: handlers only drop cache entries.
+local function on_entity_event(event) grid.on_entity(event.entity) end
+local entity_events = {
+  defines.events.on_built_entity, defines.events.on_robot_built_entity,
+  defines.events.on_space_platform_built_entity, defines.events.script_raised_built,
+  defines.events.script_raised_revive, defines.events.on_player_mined_entity,
+  defines.events.on_robot_mined_entity, defines.events.on_space_platform_mined_entity,
+  defines.events.on_entity_died, defines.events.script_raised_destroy,
+  defines.events.on_player_rotated_entity,
+}
+script.on_event(entity_events, on_entity_event)
+
+local function on_tile_event(event) grid.on_tiles(event.surface_index, event.tiles) end
+script.on_event({
+  defines.events.on_player_built_tile, defines.events.on_robot_built_tile,
+  defines.events.on_space_platform_built_tile, defines.events.on_player_mined_tile,
+  defines.events.on_robot_mined_tile, defines.events.on_space_platform_mined_tile,
+  defines.events.script_raised_set_tiles,
+}, on_tile_event)
+
+local function on_surface_gone(event) grid.drop_surface(event.surface_index) end
+script.on_event(defines.events.on_surface_cleared, on_surface_gone)
+script.on_event(defines.events.on_surface_deleted, on_surface_gone)

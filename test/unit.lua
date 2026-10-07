@@ -24,7 +24,10 @@ function equal(actual, expected, message)
   end
 end
 
-local FILES = {"cells", "heap", "refine", "layout"}
+storage = {}
+game = {tick = 0}
+
+local FILES = {"cells", "heap", "refine", "layout", "grid"}
 for _, name in ipairs(FILES) do dofile("test/" .. name .. ".lua") end
 
 print(string.format("%d passed, %d failed", passed, failed))
