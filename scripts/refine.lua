@@ -124,7 +124,31 @@ function refine.step(s, budget, cell)
           if band(m, BLOCKED) == 0 then add(nx, ny, nd, cost) end
         end
       end
-      -- Task 3: underground jumps along d go here (gathered into cand the same way).
+      if s.maxd >= 2 then
+        local ug = cells.ug_bit(d)
+        if band(mask, ug) == 0 then
+          local free_gaps, span_gaps = 0, 0
+          for k = 1, s.maxd do
+            local tx, ty = x + k * DX[d], y + k * DY[d]
+            if not refine.in_region(s.region, tx, ty) then break end
+            local m = cell(tx, ty)
+            if m == nil then s.need = {x = tx, y = ty}; return "need", used end
+            if band(m, WALL) ~= 0 or band(m, ug) ~= 0 then break end
+            if k >= 2 and band(m, BLOCKED) == 0 then
+              local lx, ly = tx + DX[d], ty + DY[d]
+              local cost = g + refine.jump_cost(s.mode, k, free_gaps, span_gaps) + surcharge(mask, d) + surcharge(m, d)
+              if is_goal(s, lx, ly, d) then
+                add(lx, ly, d, cost)
+              elseif refine.in_region(s.region, lx, ly) then
+                local ml = cell(lx, ly)
+                if ml == nil then s.need = {x = lx, y = ly}; return "need", used end
+                if band(ml, BLOCKED) == 0 then add(lx, ly, d, cost) end
+              end
+            end
+            if band(m, BLOCKED) ~= 0 then span_gaps = span_gaps + 1 else free_gaps = free_gaps + 1 end
+          end
+        end
+      end
       heap.pop(s.open)
       s.closed[id] = true
       s.expansions = s.expansions + 1
