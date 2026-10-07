@@ -73,5 +73,8 @@ for length in (200, 1000, 3000):
           f"average {sum(times) / len(times):.3f} ms/tick, {reads} chunk reads, {exp} expansions")
     avg = lambda a: sum(a) / len(a) if a else 0.0
     print(f"  ticks with chunk reads: {len(read_ticks)}, average {avg(read_ticks):.3f} ms; ticks without: {len(quiet_ticks)}, average {avg(quiet_ticks):.3f} ms; slowest tick: {worst[1]} chunk reads, {worst[3]} effort units, stage after it {worst[2]}, tick number {worst[4]}")
+
+# The server saves the map on exit: leave it running for the engine cases.
+run("game.tick_paused = false storage.bench_job = nil")
 PY
 exit 0
