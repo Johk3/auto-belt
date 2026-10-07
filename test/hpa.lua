@@ -155,3 +155,34 @@ test("hpa: a goal beyond the search range fails with the limit flag", function()
   local status = hpa.step(s, 50, open_world())
   equal(status, "failed"); equal(s.limit, true)
 end)
+
+test("hpa: a chunk whose regions are rebuilt mid-search restarts the search", function()
+  -- Chunk 1 starts with a one-tile pocket at its top-left corner (label 1), so
+  -- the open area is label 2; the rebuilt record drops the pocket and renumbers
+  -- the open area to label 1.
+  local rows = map(128, 32)
+  rows[1] = rows[1]:sub(1, 33) .. "X" .. rows[1]:sub(35)
+  rows[2] = rows[2]:sub(1, 32) .. "X" .. rows[2]:sub(34)
+  local before = fake.region_reader(rows)
+  local after = fake.region_reader(map(128, 32))
+  equal(before(1, 0).count, 2)
+  local rebuilt = false
+  local function region_of(cx, cy)
+    if cx == 1 and cy == 0 then
+      if rebuilt then
+        local rec = after(1, 0)
+        rec.gen = 7
+        return rec
+      end
+      return before(1, 0)
+    end
+    return before(cx, cy)
+  end
+  local s = hpa.new{start = {x = 1, y = 5}, goals = {{x = 126, y = 5}}, goal_point = {x = 126, y = 5}}
+  local status = hpa.step(s, 1, region_of)
+  equal(status, "running")
+  rebuilt = true
+  repeat status = hpa.step(s, 50, region_of) until status ~= "running"
+  equal(s.restarts, 1)
+  equal(status, "found"); equal(#s.chunks, 4)
+end)

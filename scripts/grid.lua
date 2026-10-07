@@ -159,12 +159,19 @@ function grid.cached(surface_index, cx, cy)
   return record_of(surface_index, cx, cy) ~= nil
 end
 
--- Builds the regions of a cached chunk. Costs grid.REGION_UNITS; the caller
--- charges them. Returns false when the chunk is not cached.
+-- Builds the regions of a cached chunk and stamps them with a new generation,
+-- so a search can tell a rebuilt record from the one it started with. Costs
+-- grid.REGION_UNITS; the caller charges them. Returns false when the chunk is
+-- not cached.
 function grid.build_regions(surface_index, cx, cy)
   local record = record_of(surface_index, cx, cy)
   if not record then return false end
-  record.regions = regions.build(record.cells)
+  local g = storage.grid
+  local gen = (g.region_gen or 0) + 1
+  g.region_gen = gen
+  local rec = regions.build(record.cells)
+  rec.gen = gen
+  record.regions = rec
   return true
 end
 

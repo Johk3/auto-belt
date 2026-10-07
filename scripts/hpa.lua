@@ -37,6 +37,9 @@ local function split(s, id)
   return (index - ly) / SPAN - hpa.RANGE + s.ocx, ly - hpa.RANGE + s.ocy, label
 end
 
+-- Region centre in tiles. Labels 1 to 254 always have a centroid, the
+-- overflow label never becomes a node, and a chunk whose regions were rebuilt
+-- restarts the search, so the chunk-centre fallback only guards bad input.
 local function centre(rec, cx, cy, label)
   local c = rec.centroids[label] or {x = 16, y = 16}
   return cx * 32 + c.x, cy * 32 + c.y
@@ -52,9 +55,32 @@ function hpa.new(p)
   local ocx, ocy = cells.chunk_of(p.start.x, p.start.y)
   return {
     start = p.start, goals = p.goals, goal_point = p.goal_point, ocx = ocx, ocy = ocy,
-    status = "running", expansions = 0, ready = false,
-    open = heap.new(), g = {}, parent = {}, closed = {}, goal_set = {},
+    status = "running", expansions = 0, restarts = 0, ready = false,
+    open = heap.new(), g = {}, parent = {}, closed = {}, goal_set = {}, gens = {},
   }
+end
+
+-- Region record of a chunk, or nil while it is not ready. Each record has a
+-- generation (rec.gen, 0 when absent); the first one seen for a chunk is kept,
+-- and a later different one marks the search stale, because its labels may
+-- have been renumbered under node ids already in the search.
+local function fetch(s, region_of, cx, cy)
+  local rec = region_of(cx, cy)
+  if not rec then return nil end
+  local index = chunk_index(s, cx, cy)
+  if index then
+    local gen = rec.gen or 0
+    local seen = s.gens[index]
+    if seen == nil then s.gens[index] = gen elseif seen ~= gen then s.stale = true end
+  end
+  return rec
+end
+
+-- Drops every node and starts over from the start and goal tiles.
+local function restart(s)
+  s.open, s.g, s.parent, s.closed, s.goal_set, s.gens = heap.new(), {}, {}, {}, {}, {}
+  s.ready, s.stale = false, nil
+  s.restarts = (s.restarts or 0) + 1
 end
 
 -- Resolves the start and goal tiles to nodes. Returns true when done, or
@@ -64,7 +90,7 @@ local function init(s, region_of)
   local function node(t)
     local cx, cy = cells.chunk_of(t.x, t.y)
     if not chunk_index(s, cx, cy) then s.limit = true; return nil end
-    local rec = region_of(cx, cy)
+    local rec = fetch(s, region_of, cx, cy)
     if not rec then s.need = {cx = cx, cy = cy}; return nil, true end
     local label = regions.label(rec, t.x - cx * 32, t.y - cy * 32)
     if label == 0 then return nil end
@@ -103,14 +129,14 @@ local function reconstruct(s, id)
 end
 
 -- Neighbour nodes of (cx, cy, label): {id, cx, cy, label, rec}, or nil and a
--- missing chunk when a neighbour chunk is not read yet. Chunks outside the
+-- missing chunk when a neighbour chunk is not ready yet. Chunks outside the
 -- search range are left out.
 local function neighbours(s, cx, cy, label, rec, region_of)
   local out = {}
   for d = 1, 4 do
     local nx, ny = cx + SIDE[d][1], cy + SIDE[d][2]
     if chunk_index(s, nx, ny) then
-      local nrec = region_of(nx, ny)
+      local nrec = fetch(s, region_of, nx, ny)
       if not nrec then return nil, {cx = nx, cy = ny} end
       local seen = {}
       for i = 0, 31 do
@@ -151,9 +177,10 @@ function hpa.step(s, budget, region_of)
         return "found", used
       end
       local cx, cy, label = split(s, id)
-      local rec = region_of(cx, cy)
+      local rec = fetch(s, region_of, cx, cy)
       if not rec then s.need = {cx = cx, cy = cy}; return "need", used end
       local list, missing = neighbours(s, cx, cy, label, rec, region_of)
+      if s.stale then restart(s); return "running", used end
       if not list then s.need = missing; return "need", used end
       heap.pop(s.open)
       s.closed[id] = true
