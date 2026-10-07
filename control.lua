@@ -7,11 +7,16 @@ AUTO_BELT.grid = grid
 AUTO_BELT.tiers = tiers
 AUTO_BELT.cells = require("scripts.cells")
 local scheduler = require("scripts.scheduler")
+local planner = require("scripts.planner")
+local panel = require("scripts.panel")
 AUTO_BELT.jobs = require("scripts.jobs")
 AUTO_BELT.endpoints = require("scripts.endpoints")
 AUTO_BELT.builder = require("scripts.builder")
 AUTO_BELT.scheduler = scheduler
 AUTO_BELT.on_tick = scheduler.tick
+AUTO_BELT.planner = planner
+scheduler.on_job_done = planner.on_job_done
+scheduler.on_build_done = planner.on_build_done
 
 local function update_tick()
   local busy = next(storage.jobs or {}) ~= nil or next(storage.builds or {}) ~= nil
@@ -59,3 +64,17 @@ script.on_event(defines.events.on_chunk_generated, function(event)
   grid.invalidate_box(event.surface.index, a.left_top.x, a.left_top.y,
     a.right_bottom.x - 1, a.right_bottom.y - 1)
 end)
+
+-- Player flow.
+script.on_event(defines.events.on_player_selected_area, planner.on_select)
+script.on_event(defines.events.on_player_alt_selected_area, planner.on_cancel)
+script.on_event(defines.events.on_player_reverse_selected_area, planner.on_cancel)
+script.on_event("auto-belt-flip", planner.on_flip)
+script.on_event(defines.events.on_player_removed, planner.on_player_removed)
+script.on_event(defines.events.on_player_cursor_stack_changed, function(event)
+  local player = game.get_player(event.player_index)
+  if player then panel.update(player) end
+end)
+script.on_event(defines.events.on_gui_switch_state_changed, panel.on_switch)
+script.on_event(defines.events.on_gui_elem_changed, panel.on_elem)
+script.on_event(defines.events.on_gui_click, panel.on_click)
