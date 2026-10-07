@@ -267,4 +267,39 @@ test("refine: a missing chunk pauses the search and resumes cleanly", function()
   end
   check(needs >= 2, "expected to wait for chunks 1 and 2")
   equal(s.status, "found"); equal(#s.result, #whole.result)
+  for i, st in ipairs(whole.result) do
+    equal(s.result[i].x, st.x); equal(s.result[i].y, st.y); equal(s.result[i].d, st.d)
+  end
+end)
+
+test("refine: resume after a missing chunk inside an underground scan", function()
+  -- One corridor with two 3-tile barriers (x 28-30 and x 61-63). Each is crossable only by one jump of span 4,
+  -- from the tile left of it ("." at x=27 and x=60); every other tile is marked as an underground-only
+  -- area ("=") so no other jump, and no duplicate queue entry, can stand in for a lost state.
+  -- The first jump lands at x=32 (the landing read needs chunk 1), the second scans x=64 (needs chunk 2).
+  local mid = string.rep("=", 27) .. ".|||." .. string.rep("=", 28) .. ".|||." .. string.rep("=", 5)
+  local rows = {string.rep("X", 70), mid, string.rep("X", 70)}
+  local cell = fake.grid(rows)
+  local function p() return params(rows, {{x = 0, y = 1, d = 1}}, {x = 69, y = 1, headings = ALL, place = true}, {max_distance = 4}) end
+  local whole = fake.solve(cell, p())
+  equal(whole.status, "found"); equal(jumps(whole.result), 2)
+  local lazy, load = fake.lazy(cell)
+  local refine = require("scripts.refine")
+  local s = refine.new(p())
+  local seen = {}
+  while true do
+    local status = refine.step(s, 1, lazy)
+    if status == "need" then
+      seen[s.need.x] = true
+      local cx, cy = cells.chunk_of(s.need.x, s.need.y)
+      load(cx, cy)
+    elseif status ~= "running" then break end
+  end
+  -- both tiles lie behind a barrier, so only a jump can ask for them
+  check(seen[32], "expected the landing read to wait for chunk 1")
+  check(seen[64], "expected the jump scan to wait for chunk 2")
+  equal(s.status, "found"); equal(#s.result, #whole.result)
+  for i, st in ipairs(whole.result) do
+    equal(s.result[i].x, st.x); equal(s.result[i].y, st.y); equal(s.result[i].d, st.d)
+  end
 end)
