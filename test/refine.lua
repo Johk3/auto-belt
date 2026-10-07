@@ -188,3 +188,83 @@ test("refine: a jump never passes under a tile outside the region", function()
   end, p)
   equal(s.status, "failed")
 end)
+
+local function tile_start(x, y)
+  local starts = {}
+  for d = 0, 3 do starts[#starts + 1] = {x = x, y = y, d = d} end
+  return starts
+end
+
+local function visits(states, x, y)
+  for _, st in ipairs(states) do if st.x == x and st.y == y then return true end end
+  return false
+end
+
+test("refine: prefers running beside an existing parallel belt", function()
+  local rows = {
+    "...........",
+    "...........",
+    "...........",
+    "...........",
+    "...........",
+    "-----------",
+  }
+  local s = fake.solve(fake.grid(rows), params(rows, tile_start(0, 0), {x = 10, y = 4, headings = ALL, place = true}, {weight10 = 10}))
+  equal(fake.turns(s.result), 1)
+  check(visits(s.result, 5, 4), "route should run along row 4, beside the belt")
+end)
+
+test("refine: keeps clear of machines when an equal route exists", function()
+  local rows = {
+    "...........",
+    ".....M.....",
+    "...........",
+    "...........",
+    "...........",
+  }
+  local s = fake.solve(fake.grid(rows), params(rows, tile_start(0, 0), {x = 10, y = 4, headings = ALL, place = true}, {weight10 = 10}))
+  check(visits(s.result, 0, 2), "route should go down column 0, away from the machine")
+end)
+
+local MAZE = {
+  "....X.........X.....",
+  ".XX.X.XXXXXXX.X.XXX.",
+  ".X..X.X.....X.X...X.",
+  ".X.XX.X.XXX.X.XXX.X.",
+  ".X....X...X.......X.",
+  ".XXXXXXXX.XXXXXXXXX.",
+  "....................",
+}
+
+test("refine: a search sliced into tiny budgets finds the same route", function()
+  local cell = fake.grid(MAZE)
+  local p = params(MAZE, {{x = 0, y = 0, d = 2}}, {x = 19, y = 0, headings = ALL, place = true}, {max_distance = 4})
+  local whole = fake.solve(cell, p)
+  local sliced = fake.solve(cell, params(MAZE, {{x = 0, y = 0, d = 2}}, {x = 19, y = 0, headings = ALL, place = true}, {max_distance = 4}), 1)
+  equal(#sliced.result, #whole.result)
+  for i, st in ipairs(whole.result) do
+    equal(sliced.result[i].x, st.x); equal(sliced.result[i].y, st.y); equal(sliced.result[i].d, st.d)
+  end
+end)
+
+test("refine: a missing chunk pauses the search and resumes cleanly", function()
+  local rows = {}
+  for y = 1, 3 do rows[y] = string.rep(".", 70) end
+  rows[2] = string.rep(".", 40) .. "|" .. string.rep(".", 29)
+  local cell = fake.grid(rows)
+  local p = function() return params(rows, {{x = 0, y = 1, d = 1}}, {x = 69, y = 1, headings = ALL, place = true}, {max_distance = 5}) end
+  local whole = fake.solve(cell, p())
+  local lazy, load = fake.lazy(cell)
+  local s = require("scripts.refine").new(p())
+  local needs = 0
+  while true do
+    local status = require("scripts.refine").step(s, 1e9, lazy)
+    if status == "need" then
+      needs = needs + 1
+      local cx, cy = cells.chunk_of(s.need.x, s.need.y)
+      load(cx, cy)
+    elseif status ~= "running" then break end
+  end
+  check(needs >= 2, "expected to wait for chunks 1 and 2")
+  equal(s.status, "found"); equal(#s.result, #whole.result)
+end)

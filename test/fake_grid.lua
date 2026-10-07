@@ -75,4 +75,14 @@ function fake.box(rows, ox, oy)
   return {x1 = ox, y1 = oy, x2 = ox + #rows[1] - 1, y2 = oy + #rows - 1}
 end
 
+function fake.lazy(cell)
+  local loaded = {[cells.chunk_key(0, 0)] = true}
+  local function lazy_cell(x, y)
+    local cx, cy = cells.chunk_of(x, y)
+    if not loaded[cells.chunk_key(cx, cy)] then return nil end
+    return cell(x, y)
+  end
+  return lazy_cell, function(cx, cy) loaded[cells.chunk_key(cx, cy)] = true end
+end
+
 return fake
