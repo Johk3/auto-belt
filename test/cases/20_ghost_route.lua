@@ -39,5 +39,6 @@ for _, e in ipairs(t.entities) do
   end
 end
 storage.ab_ghost_route = nil
+if underground < 2 then error("route has " .. underground .. " underground ghosts, need 2") end
 if #t.entities < 40 then error("route too short: " .. #t.entities) end
 return "PASS: ghost route, " .. underground .. " underground ghosts typed"

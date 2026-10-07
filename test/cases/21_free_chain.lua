@@ -36,6 +36,9 @@ while e and seen < 200 do
   else e = e.belt_neighbours.outputs[1] end
 end
 storage.ab_free_chain = nil
+local ug = 0
+for _, x in ipairs(t.entities) do if x.kind ~= "belt" then ug = ug + 1 end end
+if ug < 2 then error("route has " .. ug .. " underground entities, need 2") end
 if not e or e.position.x ~= 40.5 then error("belt chain broken after " .. seen .. " entities") end
 if seen ~= #t.entities then error("chain length " .. seen .. " vs entities " .. #t.entities) end
 return "PASS: free route forms one connected belt chain"
