@@ -92,7 +92,8 @@ end
 
 -- Outputs are created with the flow direction like inputs; the engine pairs
 -- an input and an output that share it. Ghost undergrounds take the same
--- `type` and keep it.
+-- `type` and keep it. Both raise the built event, so the cell cache drops the
+-- chunks they land in.
 function builder.place(surface, force, e, placement, player)
   local position = {e.x + 0.5, e.y + 0.5}
   local dir = direction(e.d)
@@ -103,7 +104,7 @@ function builder.place(surface, force, e, placement, player)
   end
   if placement == "ghost" then
     return surface.create_entity{name = "entity-ghost", inner_name = e.name, position = position, direction = dir,
-      force = force, player = player, type = kind}
+      force = force, player = player, type = kind, raise_built = true}
   end
   return surface.create_entity{name = e.name, position = position, direction = dir, force = force,
     player = player, type = kind, raise_built = true}

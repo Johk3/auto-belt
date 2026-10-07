@@ -46,6 +46,8 @@ local entity_events = {
   defines.events.on_player_rotated_entity,
 }
 script.on_event(entity_events, on_entity_event)
+-- A ghost cancelled by deconstruction raises no mined event.
+script.on_event(defines.events.on_pre_ghost_deconstructed, function(event) grid.on_entity(event.ghost) end)
 
 local function on_tile_event(event) grid.on_tiles(event.surface_index, event.tiles) end
 script.on_event({
