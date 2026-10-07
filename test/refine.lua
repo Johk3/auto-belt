@@ -329,3 +329,36 @@ test("refine: resume after a missing chunk on a plain belt step", function()
     equal(s.result[i].x, st.x); equal(s.result[i].y, st.y); equal(s.result[i].d, st.d)
   end
 end)
+
+test("refine: weight 1.0 matches the exhaustive search when a turn is forced early", function()
+  local rows = {
+    ".....M",
+    "..M...",
+    ".-X.XM",
+    "......",
+    ".M-M.X",
+  }
+  local cell = fake.grid(rows)
+  local function solve(w)
+    local s = fake.solve(cell, params(rows, {{x = 3, y = 0, d = 0}}, {x = 4, y = 4, headings = ALL, place = true}, {weight10 = w}))
+    equal(s.status, "found")
+    local last = s.result[#s.result]
+    return s, s.g[cells.state_id(last.x, last.y, last.d)]
+  end
+  local exact, exact_cost = solve(0)
+  local fast, fast_cost = solve(10)
+  equal(fast_cost, exact_cost)
+  equal(fake.turns(fast.result), 4)
+end)
+
+test("refine: Z shape uses exactly two turns", function()
+  local rows = {
+    "......",
+    "......",
+    "......",
+    "......",
+  }
+  local s = fake.solve(fake.grid(rows), params(rows, {{x = 0, y = 0, d = 1}}, {x = 5, y = 3, headings = {[1] = true}, place = true}))
+  equal(s.status, "found")
+  equal(fake.turns(s.result), 2)
+end)

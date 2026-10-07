@@ -41,11 +41,23 @@ function refine.in_region(region, x, y)
   return x >= region.x1 and x <= region.x2 and y >= region.y1 and y <= region.y2
 end
 
-local function heuristic(s, x, y)
-  local dx, dy = math.abs(s.goal.x - x), math.abs(s.goal.y - y)
-  local h = (dx + dy) * s.hmin
-  if dx ~= 0 and dy ~= 0 then h = h + refine.TURN end
-  return math.floor(h)
+-- Lower bound on the cost to the goal from (x, y) heading d. The turn term
+-- depends on the heading, which keeps the bound consistent: a forward move
+-- toward the goal never drops it by more than that move costs.
+local function heuristic(s, x, y, d)
+  local ddx, ddy = s.goal.x - x, s.goal.y - y
+  local need, cnt = {}, 0
+  if ddx > 0 then need[1] = true; cnt = cnt + 1 elseif ddx < 0 then need[3] = true; cnt = cnt + 1 end
+  if ddy > 0 then need[2] = true; cnt = cnt + 1 elseif ddy < 0 then need[0] = true; cnt = cnt + 1 end
+  local t = 0
+  if cnt == 1 then
+    if need[d] then t = 0
+    elseif need[(d + 2) % 4] then t = 2
+    else t = 1 end
+  elseif cnt == 2 then
+    t = need[d] and 1 or 2
+  end
+  return math.floor((math.abs(ddx) + math.abs(ddy)) * s.hmin) + t * refine.TURN
 end
 
 local function is_goal(s, x, y, d)
@@ -58,7 +70,7 @@ local function relax(s, x, y, d, g, parent)
   if (old and old <= g) or s.closed[id] then return end
   s.g[id] = g
   s.parent[id] = parent
-  local h = heuristic(s, x, y)
+  local h = heuristic(s, x, y, d)
   heap.push(s.open, (g + math.floor(h * s.weight10 / 10)) * H_SCALE + h, id)
 end
 
@@ -153,7 +165,7 @@ function refine.step(s, budget, cell)
       s.closed[id] = true
       s.expansions = s.expansions + 1
       used = used + 1
-      local h = heuristic(s, x, y)
+      local h = heuristic(s, x, y, d)
       if not s.closest or h < s.closest.h then s.closest = {x = x, y = y, h = h} end
       for i = 1, n do local c = cand[i]; relax(s, c[1], c[2], c[3], c[4], id) end
     end
