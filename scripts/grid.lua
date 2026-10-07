@@ -50,8 +50,6 @@ end
 -- Returns cell(x, y): the byte for that tile, or nil when its chunk is not cached.
 -- The closure remembers the last chunk, so build a fresh one per work step.
 function grid.reader(surface_index)
-  local surfaces = surfaces_of(false)
-  local chunks = surfaces and surfaces[surface_index]
   local last_key, last_cells
   local tick = game.tick
   local chunk_key = cells.chunk_key
@@ -59,6 +57,10 @@ function grid.reader(surface_index)
     local cx, cy = floor(x / 32), floor(y / 32)
     local key = chunk_key(cx, cy)
     if key ~= last_key then
+      -- Resolved per chunk change, so a table created or replaced after the
+      -- reader was made (first read on a surface, drop_surface) is seen.
+      local surfaces = surfaces_of(false)
+      local chunks = surfaces and surfaces[surface_index]
       local record = chunks and chunks[key]
       if not record then return nil end
       record.touched = tick
@@ -155,8 +157,10 @@ end
 -- direction (the flow direction) are neighbours; entity.neighbours is the pair.
 function grid.read_chunk(surface, cx, cy)
   if not surface.is_chunk_generated{cx, cy} then
-    return grid.put(surface.index, cx, cy,
+    local record = grid.put(surface.index, cx, cy,
       string.rep(string.char(cells.BLOCKED + cells.WALL), 1024))
+    grid.evict()
+    return record
   end
   local M = grid.MARGIN
   local W = 32 + 2 * M

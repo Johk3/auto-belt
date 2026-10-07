@@ -47,3 +47,9 @@ script.on_event({
 local function on_surface_gone(event) grid.drop_surface(event.surface_index) end
 script.on_event(defines.events.on_surface_cleared, on_surface_gone)
 script.on_event(defines.events.on_surface_deleted, on_surface_gone)
+
+script.on_event(defines.events.on_chunk_generated, function(event)
+  local a = event.area
+  grid.invalidate_box(event.surface.index, a.left_top.x, a.left_top.y,
+    a.right_bottom.x - 1, a.right_bottom.y - 1)
+end)

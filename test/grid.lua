@@ -41,3 +41,20 @@ test("grid: eviction keeps the cache under the cap", function()
   grid.CAP = cap
   game.tick = 0
 end)
+
+test("grid: reader sees a chunk stored after it was made", function()
+  storage = {}
+  local cell = grid.reader(1)
+  equal(cell(0, 0), nil)
+  grid.put(1, 0, 0, record(0))
+  equal(cell(0, 0), 0)
+end)
+
+test("grid: reader sees a record put after drop_surface", function()
+  storage = {}
+  grid.put(1, 0, 0, record(0))
+  local cell = grid.reader(1)
+  grid.drop_surface(1)
+  grid.put(1, 0, 0, record(cells.CROWDED))
+  equal(cell(0, 0), cells.CROWDED)
+end)
