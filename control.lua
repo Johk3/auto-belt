@@ -9,6 +9,7 @@ AUTO_BELT.cells = require("scripts.cells")
 local scheduler = require("scripts.scheduler")
 AUTO_BELT.jobs = require("scripts.jobs")
 AUTO_BELT.endpoints = require("scripts.endpoints")
+AUTO_BELT.builder = require("scripts.builder")
 AUTO_BELT.scheduler = scheduler
 AUTO_BELT.on_tick = scheduler.tick
 

@@ -5,6 +5,8 @@ local scheduler = {}
 
 -- Set by the planner: called once when a job leaves the searching stage.
 scheduler.on_job_done = nil
+-- Set by the planner: called once when a build finishes or is blocked.
+scheduler.on_build_done = nil
 
 local function searching()
   local list = {}
@@ -38,9 +40,20 @@ function scheduler.tick()
   end
 
   local builder = AUTO_BELT and AUTO_BELT.builder
-  if builder then
-    local batch = settings.global["auto-belt-build-batch"].value
-    for _, build in pairs(storage.builds or {}) do builder.step(build, batch) end
+  if builder and next(storage.builds or {}) then
+    local left = settings.global["auto-belt-build-batch"].value
+    local list = {}
+    for _, build in pairs(storage.builds) do list[#list + 1] = build end
+    table.sort(list, function(a, b) return a.id < b.id end)
+    for _, build in ipairs(list) do
+      if left <= 0 then break end
+      local status, placed = builder.step(build, left)
+      left = left - placed
+      if status ~= "running" then
+        storage.builds[build.id] = nil
+        if scheduler.on_build_done then scheduler.on_build_done(build) end
+      end
+    end
   end
   AUTO_BELT.update_tick()
 end

@@ -4,6 +4,7 @@ local cells = require("scripts.cells")
 local refine = require("scripts.refine")
 local layout = require("scripts.layout")
 local grid = require("scripts.grid")
+local builder = require("scripts.builder")
 
 local jobs = {}
 
@@ -97,9 +98,7 @@ end
 
 function jobs.remove(job)
   if storage.jobs then storage.jobs[job.id] = nil end
-  for _, object in pairs(job.renders or {}) do
-    if object.valid then object.destroy() end
-  end
+  builder.clear(job.renders)
 end
 
 return jobs
