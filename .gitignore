@@ -1,0 +1,7 @@
+*.zip
+test/.work/
+dist/
+
+# Development notes kept locally
+docs/
+CONTEXT.md
