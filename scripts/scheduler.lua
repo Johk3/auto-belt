@@ -11,7 +11,7 @@ scheduler.on_build_done = nil
 local function searching()
   local list = {}
   for _, job in pairs(storage.jobs or {}) do
-    if job.stage == "refine" then list[#list + 1] = job end
+    if jobs.searching(job) then list[#list + 1] = job end
   end
   table.sort(list, function(a, b) return a.id < b.id end)
   return list
@@ -20,6 +20,14 @@ end
 function scheduler.tick()
   local budget = settings.global["auto-belt-search-budget"].value
   local list = searching()
+  if #list > 1 then
+    -- Rotate the start so a small budget does not always serve the same jobs.
+    local cursor = (storage.scheduler_cursor or 0) % #list
+    storage.scheduler_cursor = cursor + 1
+    local rotated = {}
+    for i = 1, #list do rotated[i] = list[(i + cursor - 1) % #list + 1] end
+    list = rotated
+  end
   while budget > 0 and #list > 0 do
     local share = math.max(50, math.floor(budget / #list))
     local still = {}
@@ -27,7 +35,7 @@ function scheduler.tick()
       if budget > 0 then
         local used = jobs.step(job, math.min(share, budget))
         budget = budget - math.max(used, 1)
-        if job.stage == "refine" then
+        if jobs.searching(job) then
           still[#still + 1] = job
         elseif scheduler.on_job_done then
           scheduler.on_job_done(job)
@@ -55,7 +63,7 @@ function scheduler.tick()
       end
     end
   end
-  AUTO_BELT.update_tick()
+  if AUTO_BELT and AUTO_BELT.update_tick then AUTO_BELT.update_tick() end
 end
 
 return scheduler
