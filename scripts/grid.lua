@@ -2,6 +2,7 @@
 -- kept in storage.grid.surfaces[surface_index][chunk_key].
 local cells = require("scripts.cells")
 local tiers = require("scripts.tiers")
+local regions = require("scripts.regions")
 
 local grid = {}
 
@@ -110,21 +111,42 @@ function grid.drop_surface(surface_index)
   if surfaces then surfaces[surface_index] = nil end
 end
 
-function grid.evict()
+-- Drops the oldest records once the cache is over grid.CAP. `keep` (the record
+-- just stored) is never dropped, even when many records share one tick.
+function grid.evict(keep)
   local surfaces = surfaces_of(false)
   if not surfaces then return end
+  local total = 0
+  for _, chunks in pairs(surfaces) do
+    for _ in pairs(chunks) do total = total + 1 end
+  end
+  local excess = total - grid.CAP
+  if excess <= 0 then return end
   local list = {}
   for surface_index, chunks in pairs(surfaces) do
     for key, record in pairs(chunks) do
-      list[#list + 1] = {surface_index, key, record.touched or 0}
+      if record ~= keep then list[#list + 1] = {surface_index, key, record.touched or 0} end
     end
   end
-  local excess = #list - grid.CAP
-  if excess <= 0 then return end
   local drop = math.max(excess, floor(grid.CAP / 8))
   table.sort(list, function(a, b) return a[3] < b[3] end)
   for i = 1, math.min(drop, #list) do
     surfaces[list[i][1]][list[i][2]] = nil
+  end
+end
+
+-- Returns region_of(cx, cy): the chunk's region record (built on first request
+-- and kept on the cache record), or nil when the chunk is not cached.
+function grid.regions_reader(surface_index)
+  local tick = game.tick
+  return function(cx, cy)
+    local surfaces = surfaces_of(false)
+    local chunks = surfaces and surfaces[surface_index]
+    local record = chunks and chunks[cells.chunk_key(cx, cy)]
+    if not record then return nil end
+    record.touched = tick
+    if not record.regions then record.regions = regions.build(record.cells) end
+    return record.regions
   end
 end
 
@@ -159,7 +181,7 @@ function grid.read_chunk(surface, cx, cy)
   if not surface.is_chunk_generated{cx, cy} then
     local record = grid.put(surface.index, cx, cy,
       string.rep(string.char(cells.BLOCKED + cells.WALL), 1024))
-    grid.evict()
+    grid.evict(record)
     return record
   end
   local M = grid.MARGIN
@@ -264,7 +286,7 @@ function grid.read_chunk(surface, cx, cy)
     end
   end
   local record = grid.put(surface.index, cx, cy, table.concat(out))
-  grid.evict()
+  grid.evict(record)
   return record
 end
 
