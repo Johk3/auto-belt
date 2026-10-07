@@ -303,3 +303,29 @@ test("refine: resume after a missing chunk inside an underground scan", function
     equal(s.result[i].x, st.x); equal(s.result[i].y, st.y); equal(s.result[i].d, st.d)
   end
 end)
+
+test("refine: resume after a missing chunk on a plain belt step", function()
+  -- no barriers and no jump possible: every wait comes from reading the next belt tile
+  local rows = {string.rep("X", 70), string.rep("=", 70), string.rep("X", 70)}
+  local cell = fake.grid(rows)
+  local function p() return params(rows, {{x = 0, y = 1, d = 1}}, {x = 69, y = 1, headings = ALL, place = true}, {max_distance = 4}) end
+  local whole = fake.solve(cell, p())
+  equal(whole.status, "found"); equal(jumps(whole.result), 0)
+  local lazy, load = fake.lazy(cell)
+  local refine = require("scripts.refine")
+  local s = refine.new(p())
+  local seen = {}
+  while true do
+    local status = refine.step(s, 1, lazy)
+    if status == "need" then
+      seen[s.need.x] = true
+      local cx, cy = cells.chunk_of(s.need.x, s.need.y)
+      load(cx, cy)
+    elseif status ~= "running" then break end
+  end
+  check(seen[32], "expected the step from x=31 to wait for chunk 1")
+  equal(s.status, "found"); equal(#s.result, #whole.result)
+  for i, st in ipairs(whole.result) do
+    equal(s.result[i].x, st.x); equal(s.result[i].y, st.y); equal(s.result[i].d, st.d)
+  end
+end)
