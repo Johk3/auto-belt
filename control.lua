@@ -1,0 +1,1 @@
+-- Runtime entry. Event wiring is added as the game modules land.

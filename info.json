@@ -1,0 +1,9 @@
+{
+  "name": "auto-belt",
+  "version": "0.1.0",
+  "title": "Auto Belt",
+  "author": "johk",
+  "factorio_version": "2.0",
+  "description": "Click two points and get a tidy belt route between them, built as ghosts for your robots or placed for free. Choose plain belts or underground-heavy layouts. Long routes are planned in the background without slowing the game.",
+  "dependencies": ["base >= 2.0.0", "? space-age"]
+}
