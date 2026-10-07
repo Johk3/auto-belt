@@ -37,8 +37,10 @@ end
 
 local function direction_of(entity) return floor(entity.direction / 4) % 4 end
 
-local function tier_of(prototype, fallback_name)
-  return tiers.for_speed(prototype.belt_speed) or tiers.get(fallback_name)
+-- A belt names its own tier; undergrounds and splitters match by speed.
+local function tier_of(entity, ghost, kind, prototype, fallback_name)
+  local exact = kind == "transport-belt" and tiers.get(ghost and entity.ghost_name or entity.name)
+  return exact or tiers.for_speed(prototype.belt_speed) or tiers.get(fallback_name)
 end
 
 -- Tile of the splitter half nearest the click.
@@ -72,7 +74,7 @@ function endpoints.start(surface, position, fallback_tier_name)
   end
   local kind, prototype = info(entity, ghost)
   local d = direction_of(entity)
-  local tier = tier_of(prototype, fallback_tier_name)
+  local tier = tier_of(entity, ghost, kind, prototype, fallback_tier_name)
   if kind == "underground-belt" then
     if entity.belt_to_ground_type ~= "output" then return {error = "auto-belt.start-not-output"} end
   elseif kind == "splitter" then

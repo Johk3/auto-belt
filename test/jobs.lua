@@ -74,3 +74,20 @@ test("jobs: an unreachable goal fails with no-route and a closest tile", functio
     goal = {x = 5, y = 1, headings = ALL, place = true}, tier = TIER, layout = "belts", placement = "ghost"})
   equal(job.error, "auto-belt.no-route"); equal(job.closest.x, 3)
 end)
+
+test("jobs: remove updates the on_tick registration", function()
+  local rows = {"..........", ".........."}
+  fresh(rows)
+  local saved = AUTO_BELT
+  local calls = 0
+  AUTO_BELT = {update_tick = function() calls = calls + 1 end}
+  local ok, err = pcall(function()
+    local job = jobs.create{surface_index = 1, force = "player", starts = {{x = 0, y = 1, d = 1}},
+      goal = {x = 9, y = 1, headings = ALL, place = true}, tier = TIER, layout = "belts", placement = "ghost"}
+    calls = 0
+    jobs.remove(job)
+    equal(calls, 1)
+  end)
+  AUTO_BELT = saved
+  check(ok, err)
+end)

@@ -82,7 +82,7 @@ function fake_player()
   return player
 end
 
-local FILES = {"cells", "heap", "refine", "layout", "grid", "jobs", "planner"}
+local FILES = {"cells", "heap", "refine", "layout", "grid", "jobs", "endpoints", "planner"}
 for _, name in ipairs(FILES) do dofile("test/" .. name .. ".lua") end
 
 print(string.format("%d passed, %d failed", passed, failed))

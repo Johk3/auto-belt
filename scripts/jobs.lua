@@ -99,6 +99,7 @@ end
 function jobs.remove(job)
   if storage.jobs then storage.jobs[job.id] = nil end
   builder.clear(job.renders)
+  if AUTO_BELT and AUTO_BELT.update_tick then AUTO_BELT.update_tick() end
 end
 
 return jobs

@@ -48,7 +48,7 @@ function builder.preview(job)
       end
     else
       run_start = nil
-      sprite("item/" .. e.name, e, 0.5)
+      sprite("entity/" .. e.name, e, 0.5)
       if e.kind == "input" then
         pending_input = e
       elseif pending_input then
