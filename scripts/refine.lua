@@ -105,6 +105,7 @@ function refine.new(p)
 end
 
 function refine.step(s, budget, cell)
+  s.need = nil
   if s.status ~= "running" then return s.status, 0 end
   local used = 0
   local cand, n = {}, 0

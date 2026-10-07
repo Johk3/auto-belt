@@ -57,3 +57,11 @@ test("heap: random interleaved operations maintain min-heap order", function()
   equal(heap.pop(h), nil)
   equal(heap.peek(h), nil)
 end)
+
+test("heap: pop leaves no stale slots", function()
+  local h = heap.new()
+  for i = 1, 5 do heap.push(h, i, i * 10) end
+  while heap.size(h) > 0 do heap.pop(h) end
+  equal(next(h.keys), nil)
+  equal(next(h.vals), nil)
+end)

@@ -37,12 +37,14 @@ function heap.pop(h)
 
   if h.n == 1 then
     h.n = 0
+    h.keys[1], h.vals[1] = nil, nil
     return key, val
   end
 
   -- Move last to root and sift down
   local last_key = h.keys[h.n]
   local last_val = h.vals[h.n]
+  h.keys[h.n], h.vals[h.n] = nil, nil
   h.n = h.n - 1
 
   local i = 1
