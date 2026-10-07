@@ -69,6 +69,7 @@ function jobs.create(p)
     force = type(p.force) == "string" and p.force or p.force.name,
     player_index = p.player_index, starts = starts, goal = goal, tier = tier,
     layout = p.layout, placement = p.placement, stage = "refine", effort = 0, chunk_reads = 0,
+    region_builds = 0,
   }
   if near < jobs.SHORT then
     job.search = short_search(job)
@@ -141,6 +142,13 @@ local function read(job, cx, cy)
   return true
 end
 
+-- Builds the regions of a cached chunk the abstract search asked for.
+local function build_regions(job, cx, cy)
+  grid.build_regions(job.surface_index, cx, cy)
+  job.effort = job.effort + grid.REGION_UNITS
+  job.region_builds = (job.region_builds or 0) + 1
+end
+
 -- Advances the search by up to `budget` units; returns the units used.
 function jobs.step(job, budget)
   if not jobs.searching(job) then return 0 end
@@ -161,7 +169,12 @@ function jobs.step(job, budget)
         fail(job, job.abstract.limit and "auto-belt.search-limit" or "auto-belt.no-route")
       elseif status == "need" then
         local need = job.abstract.need
-        if read(job, need.cx, need.cy) then remaining = remaining - grid.CHUNK_UNITS end
+        if grid.cached(job.surface_index, need.cx, need.cy) then
+          build_regions(job, need.cx, need.cy)
+          remaining = remaining - grid.REGION_UNITS
+        elseif read(job, need.cx, need.cy) then
+          remaining = remaining - grid.CHUNK_UNITS
+        end
       end
     else
       local status, used = refine.step(job.search, remaining, grid.reader(job.surface_index))

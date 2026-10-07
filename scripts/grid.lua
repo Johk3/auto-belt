@@ -7,6 +7,7 @@ local regions = require("scripts.regions")
 local grid = {}
 
 grid.CHUNK_UNITS = 300
+grid.REGION_UNITS = 100 -- one regions.build, charged to the search budget
 grid.MARGIN = 11
 grid.CAP = 2048
 
@@ -135,19 +136,36 @@ function grid.evict(keep)
   end
 end
 
--- Returns region_of(cx, cy): the chunk's region record (built on first request
--- and kept on the cache record), or nil when the chunk is not cached.
+local function record_of(surface_index, cx, cy)
+  local surfaces = surfaces_of(false)
+  local chunks = surfaces and surfaces[surface_index]
+  return chunks and chunks[cells.chunk_key(cx, cy)]
+end
+
+-- Returns region_of(cx, cy): the chunk's region record, or nil when the chunk
+-- is not cached or its regions are not built yet (see grid.build_regions).
 function grid.regions_reader(surface_index)
   local tick = game.tick
   return function(cx, cy)
-    local surfaces = surfaces_of(false)
-    local chunks = surfaces and surfaces[surface_index]
-    local record = chunks and chunks[cells.chunk_key(cx, cy)]
+    local record = record_of(surface_index, cx, cy)
     if not record then return nil end
     record.touched = tick
-    if not record.regions then record.regions = regions.build(record.cells) end
     return record.regions
   end
+end
+
+-- True when the chunk is in the cache.
+function grid.cached(surface_index, cx, cy)
+  return record_of(surface_index, cx, cy) ~= nil
+end
+
+-- Builds the regions of a cached chunk. Costs grid.REGION_UNITS; the caller
+-- charges them. Returns false when the chunk is not cached.
+function grid.build_regions(surface_index, cx, cy)
+  local record = record_of(surface_index, cx, cy)
+  if not record then return false end
+  record.regions = regions.build(record.cells)
+  return true
 end
 
 -- Chunk reading (engine only) -------------------------------------------

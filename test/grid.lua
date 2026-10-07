@@ -63,6 +63,8 @@ test("grid: regions are built once per chunk record and dropped with it", functi
   storage = {}
   grid.put(1, 0, 0, string.rep(string.char(0), 1024))
   local region_of = grid.regions_reader(1)
+  equal(region_of(0, 0), nil, "not built yet")
+  check(grid.build_regions(1, 0, 0), "built")
   local rec = region_of(0, 0)
   equal(rec.count, 1)
   check(region_of(0, 0) == rec, "cached")
