@@ -2,9 +2,28 @@
 -- and rejects routes that overlap themselves. Pure: no game API.
 local cells = require("scripts.cells")
 local DX, DY = cells.DX, cells.DY
-local tile_key = cells.tile_key
 
 local layout = {}
+
+-- Tile sets are two-level tables, set[x][y], so every number key stays small:
+-- the game hashes a number key by its top 31 mantissa bits, and one packed
+-- key per tile would put a whole column of tiles in one hash chain.
+local function put(set, x, y, value)
+  local col = set[x]
+  if not col then col = {}; set[x] = col end
+  col[y] = value
+end
+
+local function get(set, x, y)
+  local col = set[x]
+  return col and col[y]
+end
+
+-- True when a tile set from layout.tiles holds (x, y).
+function layout.has(set, x, y)
+  local col = set[x]
+  return type(col) == "table" and col[y] == true
+end
 
 local function entity(name, kind, x, y, d)
   return {name = name, kind = kind, x = x, y = y, d = d}
@@ -24,9 +43,8 @@ end
 function layout.validate(entities)
   local seen = {}
   for _, e in ipairs(entities) do
-    local key = tile_key(e.x, e.y)
-    if seen[key] then return "loop" end
-    seen[key] = true
+    if get(seen, e.x, e.y) then return "loop" end
+    put(seen, e.x, e.y, true)
   end
   local span = {[0] = {}, [1] = {}}
   local pair_of, pair_count, open = {}, 0, nil
@@ -42,14 +60,14 @@ function layout.validate(entities)
       local ahead = dx * DX[a.d] + dy * DY[a.d]
       if ahead < 1 or math.abs(dx * DY[a.d] + dy * DX[a.d]) ~= 0 then return "loop" end
       for step = 1, ahead - 1 do
-        span[axis][tile_key(a.x + DX[a.d] * step, a.y + DY[a.d] * step)] = pair_count
+        put(span[axis], a.x + DX[a.d] * step, a.y + DY[a.d] * step, pair_count)
       end
       open = nil
     end
   end
   for i, e in ipairs(entities) do
     if e.kind ~= "belt" then
-      local owner = span[e.d % 2][tile_key(e.x, e.y)]
+      local owner = get(span[e.d % 2], e.x, e.y)
       if owner and owner ~= pair_of[i] then return "loop" end
     end
   end
@@ -67,9 +85,10 @@ function layout.build(states, goal, tier)
   return out
 end
 
+-- The set of tiles the entities stand on, for layout.has.
 function layout.tiles(entities)
   local set = {}
-  for _, e in ipairs(entities) do set[tile_key(e.x, e.y)] = true end
+  for _, e in ipairs(entities) do put(set, e.x, e.y, true) end
   return set
 end
 

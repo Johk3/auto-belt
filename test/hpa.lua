@@ -1,6 +1,7 @@
 local hpa = require("scripts.hpa")
 local cells = require("scripts.cells")
 local fake = require("test.fake_grid")
+local regions = require("scripts.regions")
 
 local function map(w, h, wall_x, gap_y)
   local rows = {}
@@ -110,4 +111,47 @@ test("hpa: search state holds no functions", function()
     end
   end
   plain(s)
+end)
+
+local LIMIT = 2147483648 -- 2^31
+
+-- Every chunk is open: one shared region record.
+local function open_world()
+  local rec = regions.build(string.rep(string.char(0), 1024))
+  return function() return rec end
+end
+
+test("hpa: node ids of a 3000-tile search stay below 2^31", function()
+  local start, goal = {x = -40000, y = 20000}, {x = -38500, y = 21500}
+  local s = hpa.new{start = start, goals = {goal}, goal_point = goal}
+  local region_of = open_world()
+  local status
+  repeat status = hpa.step(s, 50, region_of) until status ~= "running"
+  equal(status, "found")
+  local n = 0
+  for id in pairs(s.g) do
+    n = n + 1
+    check(id >= 0 and id < LIMIT and id % 1 == 0, "id out of range: " .. tostring(id))
+  end
+  check(n > 90, "searched across the chunks")
+  local first, last = s.chunks[1], s.chunks[#s.chunks]
+  local scx, scy = cells.chunk_of(start.x, start.y)
+  local gcx, gcy = cells.chunk_of(goal.x, goal.y)
+  equal(first.cx, scx); equal(first.cy, scy); equal(last.cx, gcx); equal(last.cy, gcy)
+end)
+
+test("hpa: the farthest chunk in range still has an id below 2^31", function()
+  local start = {x = 5, y = 5}
+  local goal = {x = hpa.RANGE * 32 + 5, y = hpa.RANGE * 32 + 5}
+  local s = hpa.new{start = start, goals = {goal}, goal_point = goal}
+  local status = hpa.step(s, 0, open_world())
+  equal(status, "running")
+  for id in pairs(s.goal_set) do check(id < LIMIT, "goal id below 2^31") end
+end)
+
+test("hpa: a goal beyond the search range fails with the limit flag", function()
+  local goal = {x = (hpa.RANGE + 1) * 32 + 5, y = 5}
+  local s = hpa.new{start = {x = 5, y = 5}, goals = {goal}, goal_point = goal}
+  local status = hpa.step(s, 50, open_world())
+  equal(status, "failed"); equal(s.limit, true)
 end)

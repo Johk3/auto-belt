@@ -1,12 +1,5 @@
 local cells = require("scripts.cells")
 
-test("cells: state ids round-trip, including negative tiles", function()
-  for _, s in ipairs{{0, 0, 0}, {5, -7, 1}, {-40, -40, 2}, {123456, -654321, 3}, {-1, 0, 3}} do
-    local x, y, d = cells.decode(cells.state_id(s[1], s[2], s[3]))
-    equal(x, s[1], "x"); equal(y, s[2], "y"); equal(d, s[3], "d")
-  end
-end)
-
 test("cells: chunk_of floors negative tiles", function()
   local cx, cy = cells.chunk_of(-1, -33)
   equal(cx, -1); equal(cy, -2)
@@ -22,7 +15,6 @@ test("cells: turns and axis bits", function()
   check(not cells.has(cells.BLOCKED, cells.WALL))
 end)
 
-test("cells: distinct keys for neighbouring tiles and chunks", function()
-  check(cells.tile_key(0, 1) ~= cells.tile_key(1, 0))
+test("cells: distinct keys for neighbouring chunks", function()
   check(cells.chunk_key(-1, 0) ~= cells.chunk_key(0, -1))
 end)

@@ -6,6 +6,7 @@ local jobs = require("scripts.jobs")
 local builder = require("scripts.builder")
 local cells = require("scripts.cells")
 local grid = require("scripts.grid")
+local layout = require("scripts.layout")
 
 local planner = {}
 
@@ -69,7 +70,12 @@ end
 function planner.ready_job(index)
   local p = planner.settings(index)
   local job = p.job_id and storage.jobs and storage.jobs[p.job_id]
-  if job and job.stage == "ready" and job.tiles then return job end
+  if job and job.stage == "ready" and job.tiles then
+    -- A route stored by an older version keys its tiles differently.
+    local k = next(job.tiles)
+    if k ~= nil and type(job.tiles[k]) ~= "table" then job.tiles = layout.tiles(job.entities) end
+    return job
+  end
 end
 
 function planner.build(player)
@@ -152,7 +158,7 @@ function planner.on_select(event)
   local surface = event.surface or player.surface
 
   local ready = planner.ready_job(event.player_index)
-  if ready and ready.tiles[cells.tile_key(x, y)] then
+  if ready and layout.has(ready.tiles, x, y) then
     return planner.build(player)
   end
 

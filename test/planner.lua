@@ -75,6 +75,18 @@ test("planner: a click on the ready route starts a build", function()
   equal(count(storage.jobs), 0)
 end)
 
+test("planner: a ready route stored with packed tile keys still takes the build click", function()
+  setup()
+  local job = ready_job(1)
+  -- The older format: one number key per tile, (x + 2^20) * 2^21 + (y + 2^20).
+  job.tiles = {}
+  for _, e in ipairs(job.entities) do job.tiles[(e.x + 1048576) * 2097152 + (e.y + 1048576)] = true end
+  storage.players[1] = {placement = "ghost", layout = "belts", tier = "transport-belt", job_id = job.id}
+  planner.on_select(click(4.5, 4.5))
+  equal(count(storage.builds), 1)
+  equal(count(storage.jobs), 0)
+end)
+
 test("planner: free placement disabled keeps the preview and says so", function()
   local player = setup()
   local job = ready_job(1)

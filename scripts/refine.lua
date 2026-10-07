@@ -9,7 +9,10 @@ local BLOCKED, WALL, CROWDED = cells.BLOCKED, cells.WALL, cells.CROWDED
 
 local refine = {TILE = 10, TURN = 40, NO_HUG = 3, CROWDED = 8}
 local H_SCALE = 4194304 -- f is the major key; h breaks ties toward the goal
-
+-- State ids stay below ID_LIMIT (2^31). The game hashes a number key by its
+-- top 31 mantissa bits, so larger keys that differ only in low bits share a
+-- hash chain and every lookup slows down with the size of the search.
+refine.ID_LIMIT = 2147483648
 
 local function surcharge(mask, d)
   local cost = 0
@@ -41,6 +44,42 @@ function refine.in_region(region, x, y)
   return x >= region.x1 and x <= region.x2 and y >= region.y1 and y <= region.y2
 end
 
+-- Search-local state ids: the tile's offset inside the search box, times four,
+-- plus the heading. The box (origin s.x0, s.y0, s.w by s.h tiles) covers the
+-- region, the starts and the goal, so every state the search can reach fits.
+function refine.state_id(s, x, y, d)
+  return ((x - s.x0) * s.h + (y - s.y0)) * 4 + d
+end
+
+function refine.decode(s, id)
+  local d = id % 4
+  local rest = (id - d) / 4
+  local ly = rest % s.h
+  return (rest - ly) / s.h + s.x0, ly + s.y0, d
+end
+
+-- Bounding box of the region, the starts and the goal.
+local function bounds(p)
+  local x1, y1, x2, y2 = p.goal.x, p.goal.y, p.goal.x, p.goal.y
+  local function add(ax, ay, bx, by)
+    if ax < x1 then x1 = ax end
+    if ay < y1 then y1 = ay end
+    if bx > x2 then x2 = bx end
+    if by > y2 then y2 = by end
+  end
+  for _, st in ipairs(p.starts) do add(st.x, st.y, st.x, st.y) end
+  local region = p.region
+  if region.chunks then
+    for key in pairs(region.chunks) do
+      local cx, cy = cells.chunk_xy(key)
+      add(cx * 32, cy * 32, cx * 32 + 31, cy * 32 + 31)
+    end
+  else
+    add(region.x1, region.y1, region.x2, region.y2)
+  end
+  return x1, y1, x2, y2
+end
+
 -- Lower bound on the cost to the goal from (x, y) heading d. The turn term
 -- depends on the heading, which keeps the bound consistent: a forward move
 -- toward the goal never drops it by more than that move costs.
@@ -65,7 +104,7 @@ local function is_goal(s, x, y, d)
 end
 
 local function relax(s, x, y, d, g, parent)
-  local id = cells.state_id(x, y, d)
+  local id = refine.state_id(s, x, y, d)
   local old = s.g[id]
   if (old and old <= g) or s.closed[id] then return end
   s.g[id] = g
@@ -77,7 +116,7 @@ end
 local function reconstruct(s, id)
   local back = {}
   while id ~= -1 do
-    local x, y, d = cells.decode(id)
+    local x, y, d = refine.decode(s, id)
     back[#back + 1] = {x = x, y = y, d = d}
     id = s.parent[id]
   end
@@ -94,6 +133,13 @@ function refine.new(p)
     status = "running", expansions = 0,
   }
   s.hmin = min_tile_cost(s.mode, s.maxd)
+  local x1, y1, x2, y2 = bounds(p)
+  s.x0, s.y0, s.w, s.h = x1, y1, x2 - x1 + 1, y2 - y1 + 1
+  if s.w * s.h * 4 > refine.ID_LIMIT then
+    -- Too large to number; the job reports a search limit.
+    s.status, s.limit = "failed", true
+    return s
+  end
   for _, st in ipairs(p.starts) do
     if is_goal(s, st.x, st.y, st.d) then
       s.status, s.result = "found", {{x = st.x, y = st.y, d = st.d}}
@@ -116,7 +162,7 @@ function refine.step(s, budget, cell)
     if s.closed[id] then
       heap.pop(s.open)
     else
-      local x, y, d = cells.decode(id)
+      local x, y, d = refine.decode(s, id)
       if is_goal(s, x, y, d) then
         s.status, s.result = "found", reconstruct(s, id)
         return "found", used

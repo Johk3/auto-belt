@@ -10,12 +10,31 @@ local hpa = {TILE = 10, MIN_EDGE = 10}
 local H_SCALE = 4194304 -- f is the major key; h breaks ties toward the goal
 local SIDE = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}}
 
-local function node_id(cx, cy, label) return cells.chunk_key(cx, cy) * 256 + label end
+-- Node ids are local to the search and stay below 2^31: the game hashes a
+-- number key by its top 31 mantissa bits, so larger keys that differ only in
+-- low bits share a hash chain. Chunks are numbered relative to the start
+-- chunk; a chunk more than hpa.RANGE chunks away on either axis is outside
+-- the search.
+hpa.RANGE = 1023
+local SPAN = 2 * hpa.RANGE + 1
 
-local function split(id)
+-- Local index of a chunk, or nil when it lies outside the search range.
+local function chunk_index(s, cx, cy)
+  local lx, ly = cx - s.ocx + hpa.RANGE, cy - s.ocy + hpa.RANGE
+  if lx < 0 or ly < 0 or lx >= SPAN or ly >= SPAN then return nil end
+  return lx * SPAN + ly
+end
+
+local function node_id(s, cx, cy, label)
+  local index = chunk_index(s, cx, cy)
+  return index and index * 256 + label
+end
+
+local function split(s, id)
   local label = id % 256
-  local cx, cy = cells.chunk_xy((id - label) / 256)
-  return cx, cy, label
+  local index = (id - label) / 256
+  local ly = index % SPAN
+  return (index - ly) / SPAN - hpa.RANGE + s.ocx, ly - hpa.RANGE + s.ocy, label
 end
 
 local function centre(rec, cx, cy, label)
@@ -24,14 +43,15 @@ local function centre(rec, cx, cy, label)
 end
 
 local function heuristic(s, id, rec)
-  local cx, cy, label = split(id)
+  local cx, cy, label = split(s, id)
   local x, y = centre(rec, cx, cy, label)
   return (math.abs(x - s.goal_point.x) + math.abs(y - s.goal_point.y)) * hpa.TILE
 end
 
 function hpa.new(p)
+  local ocx, ocy = cells.chunk_of(p.start.x, p.start.y)
   return {
-    start = p.start, goals = p.goals, goal_point = p.goal_point,
+    start = p.start, goals = p.goals, goal_point = p.goal_point, ocx = ocx, ocy = ocy,
     status = "running", expansions = 0, ready = false,
     open = heap.new(), g = {}, parent = {}, closed = {}, goal_set = {},
   }
@@ -43,11 +63,12 @@ local function init(s, region_of)
   local goal_set, any = {}, false
   local function node(t)
     local cx, cy = cells.chunk_of(t.x, t.y)
+    if not chunk_index(s, cx, cy) then s.limit = true; return nil end
     local rec = region_of(cx, cy)
     if not rec then s.need = {cx = cx, cy = cy}; return nil, true end
     local label = regions.label(rec, t.x - cx * 32, t.y - cy * 32)
     if label == 0 then return nil end
-    return node_id(cx, cy, label), false, rec
+    return node_id(s, cx, cy, label), false, rec
   end
   local sid, missing, srec = node(s.start)
   if missing then return false end
@@ -59,6 +80,7 @@ local function init(s, region_of)
   s.need = nil
   s.ready = true
   if not sid or not any then s.status = "failed"; return true end
+  s.limit = nil
   s.goal_set = goal_set
   s.g[sid] = 0
   s.parent[sid] = -1
@@ -70,7 +92,7 @@ end
 local function reconstruct(s, id)
   local back = {}
   while id ~= -1 do
-    local cx, cy = split(id)
+    local cx, cy = split(s, id)
     local last = back[#back]
     if not last or last.cx ~= cx or last.cy ~= cy then back[#back + 1] = {cx = cx, cy = cy} end
     id = s.parent[id]
@@ -81,25 +103,28 @@ local function reconstruct(s, id)
 end
 
 -- Neighbour nodes of (cx, cy, label): {id, cx, cy, label, rec}, or nil and a
--- missing chunk when a neighbour chunk is not read yet.
-local function neighbours(cx, cy, label, rec, region_of)
+-- missing chunk when a neighbour chunk is not read yet. Chunks outside the
+-- search range are left out.
+local function neighbours(s, cx, cy, label, rec, region_of)
   local out = {}
   for d = 1, 4 do
     local nx, ny = cx + SIDE[d][1], cy + SIDE[d][2]
-    local nrec = region_of(nx, ny)
-    if not nrec then return nil, {cx = nx, cy = ny} end
-    local seen = {}
-    for i = 0, 31 do
-      local ax, ay, bx, by
-      if d == 1 then ax, ay, bx, by = i, 0, i, 31
-      elseif d == 2 then ax, ay, bx, by = 31, i, 0, i
-      elseif d == 3 then ax, ay, bx, by = i, 31, i, 0
-      else ax, ay, bx, by = 0, i, 31, i end
-      if regions.label(rec, ax, ay) == label then
-        local other = regions.label(nrec, bx, by)
-        if other > 0 and not seen[other] then
-          seen[other] = true
-          out[#out + 1] = {id = node_id(nx, ny, other), cx = nx, cy = ny, label = other, rec = nrec}
+    if chunk_index(s, nx, ny) then
+      local nrec = region_of(nx, ny)
+      if not nrec then return nil, {cx = nx, cy = ny} end
+      local seen = {}
+      for i = 0, 31 do
+        local ax, ay, bx, by
+        if d == 1 then ax, ay, bx, by = i, 0, i, 31
+        elseif d == 2 then ax, ay, bx, by = 31, i, 0, i
+        elseif d == 3 then ax, ay, bx, by = i, 31, i, 0
+        else ax, ay, bx, by = 0, i, 31, i end
+        if regions.label(rec, ax, ay) == label then
+          local other = regions.label(nrec, bx, by)
+          if other > 0 and not seen[other] then
+            seen[other] = true
+            out[#out + 1] = {id = node_id(s, nx, ny, other), cx = nx, cy = ny, label = other, rec = nrec}
+          end
         end
       end
     end
@@ -125,10 +150,10 @@ function hpa.step(s, budget, region_of)
         s.status, s.chunks = "found", reconstruct(s, id)
         return "found", used
       end
-      local cx, cy, label = split(id)
+      local cx, cy, label = split(s, id)
       local rec = region_of(cx, cy)
       if not rec then s.need = {cx = cx, cy = cy}; return "need", used end
-      local list, missing = neighbours(cx, cy, label, rec, region_of)
+      local list, missing = neighbours(s, cx, cy, label, rec, region_of)
       if not list then s.need = missing; return "need", used end
       heap.pop(s.open)
       s.closed[id] = true

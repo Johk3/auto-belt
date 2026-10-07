@@ -263,6 +263,50 @@ test("jobs: too many chunk reads fail with search-limit", function()
   if not ok then error(err, 0) end
 end)
 
+test("jobs: an abstract search stored in the older format starts over", function()
+  fresh(wide(200, 96, 100, 80))
+  local job = long_job(5, 5)
+  jobs.step(job, 3)
+  equal(job.stage, "abstract")
+  -- The older format: no chunk origin, node ids from the packed chunk key.
+  job.abstract.ocx, job.abstract.ocy = nil, nil
+  job.abstract.g = {[2147516416 * 256 + 1] = 0}
+  finish(job)
+  equal(job.stage, "ready")
+  local through_gap = false
+  for _, e in ipairs(job.entities) do if e.x == 100 then through_gap = e.y == 80 or through_gap end end
+  check(through_gap, "route crosses the wall at the gap")
+end)
+
+test("jobs: a refine search stored in the older format starts over with the same route", function()
+  local rows = {"..........", "....|.....", ".........."}
+  local function make()
+    return jobs.create{surface_index = 1, force = "player", starts = {{x = 0, y = 1, d = 1}},
+      goal = {x = 9, y = 1, headings = ALL, place = true}, tier = TIER, layout = "belts", placement = "ghost"}
+  end
+  fresh(rows)
+  local whole = run(make())
+  local job = make()
+  jobs.step(job, 3)
+  job.search.x0, job.search.y0, job.search.w, job.search.h = nil, nil, nil, nil
+  run(job)
+  equal(job.stage, "ready"); equal(#job.entities, #whole.entities)
+  for i, e in ipairs(whole.entities) do
+    equal(job.entities[i].x, e.x); equal(job.entities[i].y, e.y); equal(job.entities[i].d, e.d)
+  end
+  -- A long route in its refine stage keeps its corridor.
+  fresh(wide(200, 32))
+  local long = long_job(5, 5)
+  for _ = 1, 10000 do
+    if long.stage ~= "abstract" then break end
+    jobs.step(long, 50)
+  end
+  equal(long.stage, "refine")
+  long.search.x0 = nil
+  finish(long)
+  equal(long.stage, "ready")
+end)
+
 local function budgets(search, build)
   settings.global["auto-belt-search-budget"] = {value = search}
   settings.global["auto-belt-build-batch"] = {value = build}

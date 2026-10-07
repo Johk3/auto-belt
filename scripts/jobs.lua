@@ -20,6 +20,35 @@ function jobs.searching(job)
   return job.stage == "abstract" or job.stage == "refine"
 end
 
+-- The refine search of a short route: a box around the starts and the goal.
+local function short_search(job)
+  local starts, goal = job.starts, job.goal
+  local x1, y1, x2, y2 = goal.x, goal.y, goal.x, goal.y
+  for _, s in ipairs(starts) do
+    x1, x2 = math.min(x1, s.x), math.max(x2, s.x)
+    y1, y2 = math.min(y1, s.y), math.max(y2, s.y)
+  end
+  return refine.new{
+    starts = starts, goal = goal, mode = job.layout,
+    region = {x1 = x1 - PAD, y1 = y1 - PAD, x2 = x2 + PAD, y2 = y2 + PAD},
+    max_distance = job.tier.underground and job.tier.max_distance or 0,
+    weight10 = 10,
+  }
+end
+
+-- The abstract search of a long route, toward the tiles the goal is entered from.
+local function abstract_search(job)
+  local goal, approach = job.goal, {}
+  if goal.place then
+    approach[1] = {x = goal.x, y = goal.y}
+  else
+    for h in pairs(goal.headings) do approach[#approach + 1] = {x = goal.x - DX[h], y = goal.y - DY[h]} end
+    table.sort(approach, function(a, b) if a.x ~= b.x then return a.x < b.x end return a.y < b.y end)
+  end
+  return hpa.new{start = {x = job.starts[1].x, y = job.starts[1].y}, goals = approach,
+    goal_point = {x = goal.x, y = goal.y}}
+end
+
 function jobs.create(p)
   storage.jobs = storage.jobs or {}
   local id = storage.next_id or 1
@@ -27,12 +56,9 @@ function jobs.create(p)
   local tier = {belt = p.tier.belt, underground = p.tier.underground,
     max_distance = p.tier.max_distance or 0, speed = p.tier.speed}
   local starts, goal = {}, p.goal
-  local x1, y1, x2, y2 = goal.x, goal.y, goal.x, goal.y
   local near = math.huge
   for i, s in ipairs(p.starts) do
     starts[i] = {x = s.x, y = s.y, d = s.d}
-    x1, x2 = math.min(x1, s.x), math.max(x2, s.x)
-    y1, y2 = math.min(y1, s.y), math.max(y2, s.y)
     near = math.min(near, math.abs(s.x - goal.x) + math.abs(s.y - goal.y))
   end
   local headings = {}
@@ -45,23 +71,10 @@ function jobs.create(p)
     layout = p.layout, placement = p.placement, stage = "refine", effort = 0, chunk_reads = 0,
   }
   if near < jobs.SHORT then
-    job.search = refine.new{
-      starts = starts, goal = goal, mode = p.layout,
-      region = {x1 = x1 - PAD, y1 = y1 - PAD, x2 = x2 + PAD, y2 = y2 + PAD},
-      max_distance = tier.underground and tier.max_distance or 0,
-      weight10 = 10,
-    }
+    job.search = short_search(job)
   else
-    local approach = {}
-    if goal.place then
-      approach[1] = {x = goal.x, y = goal.y}
-    else
-      for h in pairs(goal.headings) do approach[#approach + 1] = {x = goal.x - DX[h], y = goal.y - DY[h]} end
-      table.sort(approach, function(a, b) if a.x ~= b.x then return a.x < b.x end return a.y < b.y end)
-    end
     job.stage, job.ring = "abstract", 1
-    job.abstract = hpa.new{start = {x = starts[1].x, y = starts[1].y}, goals = approach,
-      goal_point = {x = goal.x, y = goal.y}}
+    job.abstract = abstract_search(job)
   end
   storage.jobs[id] = job
   if AUTO_BELT and AUTO_BELT.update_tick then AUTO_BELT.update_tick() end
@@ -96,8 +109,20 @@ local function start_refine(job)
   }
 end
 
+-- Searches stored by an older version number their nodes differently; they
+-- start over from the job's starts and goal.
+local function upgrade(job)
+  if job.stage == "abstract" and job.abstract and job.abstract.ocx == nil then
+    job.abstract = abstract_search(job)
+  elseif job.stage == "refine" and job.search and job.search.x0 == nil then
+    if job.chunks then start_refine(job) else job.search = short_search(job) end
+  end
+end
+
 local function refine_failed(job)
-  if job.ring == 1 then
+  if job.search.limit then
+    fail(job, "auto-belt.search-limit")
+  elseif job.ring == 1 then
     job.ring = 2
     start_refine(job)
   else
@@ -119,6 +144,7 @@ end
 -- Advances the search by up to `budget` units; returns the units used.
 function jobs.step(job, budget)
   if not jobs.searching(job) then return 0 end
+  upgrade(job)
   local max_effort = settings.global["auto-belt-max-effort"].value
   budget = math.min(budget, max_effort - job.effort)
   if budget <= 0 then fail(job, "auto-belt.search-limit"); return 0 end
@@ -132,7 +158,7 @@ function jobs.step(job, budget)
         job.chunks, job.abstract, job.stage = job.abstract.chunks, nil, "refine"
         start_refine(job)
       elseif status == "failed" then
-        fail(job, "auto-belt.no-route")
+        fail(job, job.abstract.limit and "auto-belt.search-limit" or "auto-belt.no-route")
       elseif status == "need" then
         local need = job.abstract.need
         if read(job, need.cx, need.cy) then remaining = remaining - grid.CHUNK_UNITS end

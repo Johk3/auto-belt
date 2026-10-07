@@ -344,7 +344,7 @@ test("refine: weight 1.0 matches the exhaustive search when a turn is forced ear
     local s = fake.solve(cell, params(rows, {{x = 3, y = 0, d = 0}}, {x = 4, y = 4, headings = ALL, place = true}, {weight10 = w}))
     equal(s.status, "found")
     local last = s.result[#s.result]
-    return s, s.g[cells.state_id(last.x, last.y, last.d)]
+    return s, s.g[refine_module.state_id(s, last.x, last.y, last.d)]
   end
   local exact, exact_cost = solve(0)
   local fast, fast_cost = solve(10)
@@ -362,4 +362,85 @@ test("refine: Z shape uses exactly two turns", function()
   local s = fake.solve(fake.grid(rows), params(rows, {{x = 0, y = 0, d = 1}}, {x = 5, y = 3, headings = {[1] = true}, place = true}))
   equal(s.status, "found")
   equal(fake.turns(s.result), 2)
+end)
+
+local LIMIT = 2147483648 -- 2^31
+
+-- Every state id the search holds, checked against the bound and the box.
+local function check_ids(s)
+  local n = 0
+  for id in pairs(s.g) do
+    n = n + 1
+    check(id >= 0 and id < LIMIT and id % 1 == 0, "id out of range: " .. tostring(id))
+    local x, y, d = refine_module.decode(s, id)
+    equal(refine_module.state_id(s, x, y, d), id, "round trip")
+  end
+  return n
+end
+
+test("refine: state ids round-trip at negative tiles and the box edges", function()
+  local p = {starts = {{x = -1000000, y = -7, d = 1}}, goal = {x = -999000, y = 4000, headings = ALL, place = true},
+    region = {x1 = -1000010, y1 = -20, x2 = -998990, y2 = 4010}, mode = "belts", max_distance = 0}
+  local s = refine_module.new(p)
+  equal(s.status, "running")
+  for _, t in ipairs{{-1000010, -20}, {-998990, 4010}, {-1000010, 4010}, {-998990, -20}, {-1000000, -7}, {-999000, 4000}} do
+    for d = 0, 3 do
+      local id = refine_module.state_id(s, t[1], t[2], d)
+      check(id >= 0 and id < LIMIT, "id out of range")
+      local x, y, dd = refine_module.decode(s, id)
+      equal(x, t[1], "x"); equal(y, t[2], "y"); equal(dd, d, "d")
+    end
+  end
+end)
+
+-- The corridor of a route about 3000 tiles long: an L through chunks east
+-- then south, at negative tiles, two rings wide.
+local function long_corridor()
+  local path = {}
+  for cx = -1000, -953 do path[#path + 1] = {cx = cx, cy = -500} end
+  for cy = -499, -453 do path[#path + 1] = {cx = -953, cy = cy} end
+  return path
+end
+
+test("refine: ids of a 3000-tile corridor stay below 2^31 and round-trip at its edges", function()
+  local path = long_corridor()
+  local chunks = {}
+  for _, c in ipairs(path) do
+    for dx = -2, 2 do for dy = -2, 2 do chunks[cells.chunk_key(c.cx + dx, c.cy + dy)] = true end end
+  end
+  local start = {x = -1000 * 32 + 5, y = -500 * 32 + 5, d = 1}
+  local goal = {x = -953 * 32 + 20, y = -453 * 32 + 20, headings = ALL, place = true}
+  local s = refine_module.new{starts = {start}, goal = goal, region = {chunks = chunks}, mode = "belts", max_distance = 0}
+  equal(s.status, "running")
+  local x1, y1 = -1002 * 32, -502 * 32
+  local x2, y2 = -951 * 32 + 31, -451 * 32 + 31
+  check(refine_module.state_id(s, x2, y2, 3) < LIMIT, "largest id below 2^31")
+  for _, t in ipairs{{x1, y1}, {x2, y2}, {x1, y2}, {x2, y1}, {start.x, start.y}, {goal.x, goal.y}} do
+    for d = 0, 3 do
+      local id = refine_module.state_id(s, t[1], t[2], d)
+      check(id >= 0 and id < LIMIT, "id out of range")
+      local x, y, dd = refine_module.decode(s, id)
+      equal(x, t[1], "x"); equal(y, t[2], "y"); equal(dd, d, "d")
+    end
+  end
+end)
+
+test("refine: a tall north-south search keeps every id below 2^31", function()
+  local rows = {}
+  for y = 1, 3000 do rows[y] = "..." end
+  local ox, oy = -50000, -1500
+  local s = fake.solve(fake.grid(rows, ox, oy), {starts = {{x = ox + 1, y = oy, d = 2}},
+    goal = {x = ox + 1, y = oy + 2999, headings = ALL, place = true}, region = fake.box(rows, ox, oy),
+    mode = "belts", max_distance = 0})
+  equal(s.status, "found"); equal(#s.result, 3000)
+  check(check_ids(s) >= 3000, "searched the column")
+end)
+
+test("refine: a region too large to number fails with the limit flag", function()
+  local chunks = {[cells.chunk_key(-800, -800)] = true, [cells.chunk_key(800, 800)] = true}
+  local s = refine_module.new{starts = {{x = -800 * 32, y = -800 * 32, d = 1}},
+    goal = {x = 800 * 32, y = 800 * 32, headings = ALL, place = true}, region = {chunks = chunks}, mode = "belts"}
+  equal(s.status, "failed"); equal(s.limit, true)
+  local status = refine_module.step(s, 100, function() return 0 end)
+  equal(status, "failed")
 end)
