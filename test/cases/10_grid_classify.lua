@@ -6,7 +6,7 @@ if not s then
   s.force_generate_chunk_requests()
 end
 local grid, cells = AUTO_BELT.grid, AUTO_BELT.cells
-for _, e in pairs(s.find_entities{{0, 0}, {32, 32}}) do e.destroy() end
+for _, e in pairs(s.find_entities{{0, 0}, {40, 40}}) do e.destroy() end
 s.create_entity{name = "assembling-machine-1", position = {5.5, 5.5}, force = "player"}
 s.create_entity{name = "transport-belt", position = {10.5, 10.5}, direction = defines.direction.east, force = "player"}
 local u1 = s.create_entity{name = "underground-belt", position = {0.5, 14.5}, direction = defines.direction.east, type = "input", force = "player"}
