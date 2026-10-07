@@ -1,5 +1,6 @@
 local fake = require("test.fake_grid")
 local cells = require("scripts.cells")
+local refine_module = require("scripts.refine")
 local ALL = {[0] = true, [1] = true, [2] = true, [3] = true}
 
 local function params(rows, starts, goal, extra)
@@ -255,10 +256,10 @@ test("refine: a missing chunk pauses the search and resumes cleanly", function()
   local p = function() return params(rows, {{x = 0, y = 1, d = 1}}, {x = 69, y = 1, headings = ALL, place = true}, {max_distance = 5}) end
   local whole = fake.solve(cell, p())
   local lazy, load = fake.lazy(cell)
-  local s = require("scripts.refine").new(p())
+  local s = refine_module.new(p())
   local needs = 0
   while true do
-    local status = require("scripts.refine").step(s, 1e9, lazy)
+    local status = refine_module.step(s, 1e9, lazy)
     if status == "need" then
       needs = needs + 1
       local cx, cy = cells.chunk_of(s.need.x, s.need.y)
@@ -284,7 +285,7 @@ test("refine: resume after a missing chunk inside an underground scan", function
   local whole = fake.solve(cell, p())
   equal(whole.status, "found"); equal(jumps(whole.result), 2)
   local lazy, load = fake.lazy(cell)
-  local refine = require("scripts.refine")
+  local refine = refine_module
   local s = refine.new(p())
   local seen = {}
   while true do
@@ -312,7 +313,7 @@ test("refine: resume after a missing chunk on a plain belt step", function()
   local whole = fake.solve(cell, p())
   equal(whole.status, "found"); equal(jumps(whole.result), 0)
   local lazy, load = fake.lazy(cell)
-  local refine = require("scripts.refine")
+  local refine = refine_module
   local s = refine.new(p())
   local seen = {}
   while true do

@@ -50,6 +50,8 @@ function panel.update(player)
   frame.auto_belt_cancel.visible = ready
 end
 
+planner.refresh = panel.update
+
 local function own(event)
   local element = event.element
   if not (element and element.valid and element.name:sub(1, 10) == "auto_belt_") then return end

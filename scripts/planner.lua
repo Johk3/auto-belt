@@ -26,8 +26,11 @@ local function say(player, key, ...)
   player.create_local_flying_text{text = {key, ...}, create_at_cursor = true}
 end
 
+-- Set by the panel at load: redraws the player's panel.
+planner.refresh = nil
+
 local function refresh(player)
-  require("scripts.panel").update(player)
+  if planner.refresh then planner.refresh(player) end
 end
 
 local function mark(player, p, surface, x, y)

@@ -4,7 +4,11 @@ local filter, verbose = UNIT_FILTER, UNIT_VERBOSE
 
 function test(name, fn)
   if filter and not name:find(filter, 1, true) then return end
+  REAL_REQUIRE = REAL_REQUIRE or require
+  local real_require = REAL_REQUIRE
+  require = function(name) error("require at runtime: " .. tostring(name), 2) end
   local ok, err = pcall(fn)
+  require = real_require
   if ok then
     passed = passed + 1
     if verbose then print("ok    " .. name) end

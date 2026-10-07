@@ -1,5 +1,6 @@
 local layout = require("scripts.layout")
 local fake = require("test.fake_grid")
+local cells = require("scripts.cells")
 local TIER = {belt = "transport-belt", underground = "underground-belt"}
 local ALL = {[0] = true, [1] = true, [2] = true, [3] = true}
 
@@ -51,7 +52,7 @@ test("layout: a solved route converts without loops", function()
   local e = layout.build(s.result, {x = 9, y = 1, headings = ALL, place = true}, TIER)
   check(e ~= nil, "layout failed")
   local tiles = layout.tiles(e)
-  check(tiles[require("scripts.cells").tile_key(9, 1)], "goal tile listed")
+  check(tiles[cells.tile_key(9, 1)], "goal tile listed")
 end)
 
 local function pair(x1, y1, x2, y2, d)

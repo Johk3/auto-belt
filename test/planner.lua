@@ -4,6 +4,10 @@ local endpoints = require("scripts.endpoints")
 local jobs = require("scripts.jobs")
 local builder = require("scripts.builder")
 local layout = require("scripts.layout")
+require("scripts.grid")
+require("scripts.tiers")
+require("scripts.scheduler")
+require("scripts.cells")
 local ALL = {[0] = true, [1] = true, [2] = true, [3] = true}
 local TIER = {belt = "transport-belt", underground = "underground-belt", max_distance = 5}
 
@@ -229,6 +233,7 @@ test("control: on_tick is registered exactly while a job or build exists, on_loa
     on_nth_tick = function() end,
   }
   defines.events = setmetatable({}, {__index = function(_, name) return name end})
+  require = REAL_REQUIRE
   local ok, err = pcall(dofile, "control.lua")
   local belt = AUTO_BELT
   local restore = function() script, defines.events, AUTO_BELT = saved_script, saved_events, saved_belt end
