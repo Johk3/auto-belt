@@ -440,6 +440,59 @@ local function budgets(search, build)
   settings.global["auto-belt-build-batch"] = {value = build}
 end
 
+test("scheduler: a completed job cannot precede an oversized read in the same tick", function()
+  local rows = {string.rep(".", 100), string.rep(".", 100), string.rep(".", 100)}
+  fresh(rows)
+  budgets(50, 150)
+  local function route(x, goal)
+    return jobs.create{surface_index = 1, force = "player", starts = {{x = x, y = 1, d = 1}},
+      goal = {x = goal, y = 1, headings = ALL, place = true}, tier = TIER, layout = "belts", placement = "ghost"}
+  end
+  local a, b = route(0, 1), route(64, 73)
+  grid.invalidate_box(1, 64, 0, 95, 31)
+  local reads = 0
+  with_reads(function() reads = reads + 1; fake.records(rows, 1) end, function()
+    scheduler.tick()
+    equal(a.stage, "ready")
+    equal(reads, 0, "the pending read waits after another job expands")
+    check(a.effort + b.effort <= 50, "shared tick budget")
+    scheduler.tick()
+    equal(reads, 1, "the deferred job reads on the next tick")
+    for _ = 1, 100 do
+      if b.stage == "ready" then break end
+      scheduler.tick()
+    end
+    equal(b.stage, "ready")
+  end)
+end)
+
+test("scheduler: spending a share consumes the global overrun allowance", function()
+  fresh(wide(200, 64))
+  budgets(100, 150)
+  local a, b = long_job(5, 5), long_job(50, 50)
+  local real_step, spent, reads = jobs.step, 0, 0
+  jobs.step = function(job, budget, first)
+    if job.id == a.id then spent = spent + budget; return budget end
+    if budget >= grid.CHUNK_UNITS or first then
+      reads = reads + 1
+      spent = spent + grid.CHUNK_UNITS
+      return grid.CHUNK_UNITS
+    end
+    return 0
+  end
+  local ok, err = pcall(function()
+    scheduler.tick()
+    check(spent <= 100, "shared tick spent " .. spent)
+    equal(reads, 0)
+    spent = 0
+    scheduler.tick()
+    equal(reads, 1, "rotation gives the waiting job the next first share")
+    check(spent <= 100, "rotated tick spent " .. spent)
+  end)
+  jobs.step = real_step
+  if not ok then error(err) end
+end)
+
 test("scheduler: two long jobs share the budget and both finish", function()
   fresh(wide(200, 64))
   budgets(600, 150)

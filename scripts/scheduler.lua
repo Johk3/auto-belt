@@ -28,9 +28,9 @@ function scheduler.tick()
     for i = 1, #list do rotated[i] = list[(i + cursor - 1) % #list + 1] end
     list = rotated
   end
-  -- Only a job's first step in the tick may start with a chunk read that
-  -- costs more than its share. A job that could use none of its share is
-  -- waiting for such a read and is served again next tick.
+  -- Only before any job spends work may a read exceed its share. A job
+  -- waiting for such a read is served again next tick, with rotation giving
+  -- every waiting job a turn at the first share.
   local first = true
   while budget > 0 and #list > 0 do
     local share = math.max(50, math.floor(budget / #list))
@@ -38,6 +38,7 @@ function scheduler.tick()
     for _, job in ipairs(list) do
       if budget > 0 then
         local used = jobs.step(job, math.min(share, budget), first)
+        if used > 0 then first = false end
         budget = budget - math.max(used, 1)
         if jobs.searching(job) then
           if used > 0 then still[#still + 1] = job end
@@ -49,7 +50,6 @@ function scheduler.tick()
       end
     end
     list = still
-    first = false
   end
 
   local builder = AUTO_BELT and AUTO_BELT.builder

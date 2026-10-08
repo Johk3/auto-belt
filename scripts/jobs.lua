@@ -152,9 +152,9 @@ end
 
 -- Advances the search by up to `budget` units; returns the units used. A
 -- chunk read or a region build that does not fit in what is left of the
--- budget waits for a later call. Only the first work of a job in a tick may
--- overrun: with `first` (the default), a read that costs more than the whole
--- budget still happens when it comes before anything else.
+-- budget waits for a later call. Before any job has spent work in a tick,
+-- `first` (the default) allows a read exceeding the supplied budget when it
+-- comes before anything else in this call.
 function jobs.step(job, budget, first)
   if not jobs.searching(job) then return 0 end
   upgrade(job)
