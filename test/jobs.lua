@@ -257,6 +257,56 @@ test("jobs: an uncached chunk is read, charged and counted", function()
   end)
 end)
 
+test("jobs: a chunk read that does not fit waits for the next step", function()
+  local rows = {"..........", "..........", ".........."}
+  fresh(rows)
+  grid.invalidate_box(1, 0, 0, 9, 2)
+  local reads = 0
+  with_reads(function() reads = reads + 1; fake.records(rows, 1) end, function()
+    local job = jobs.create{surface_index = 1, force = "player", starts = {{x = 0, y = 1, d = 1}},
+      goal = {x = 9, y = 1, headings = ALL, place = true}, tier = TIER, layout = "belts", placement = "ghost"}
+    -- Not the first step of the tick: the read waits and nothing is used.
+    equal(jobs.step(job, grid.CHUNK_UNITS - 1, false), 0)
+    equal(reads, 0)
+    -- The first step of a tick reads even when the read costs more than the budget.
+    equal(jobs.step(job, 1), grid.CHUNK_UNITS)
+    equal(reads, 1)
+    equal(job.effort, grid.CHUNK_UNITS)
+  end)
+end)
+
+test("scheduler: a tick reads at most one chunk, and only before any expansion, when a read costs more than the budget", function()
+  local rows = {}
+  for y = 1, 3 do rows[y] = string.rep(".", 100) end
+  fresh(rows)
+  settings.global["auto-belt-search-budget"] = {value = math.max(1, grid.CHUNK_UNITS - 1)}
+  settings.global["auto-belt-build-batch"] = {value = 150}
+  grid.invalidate_box(1, 0, 0, 99, 2)
+  local reads = 0
+  local cell = fake.grid(rows)
+  with_reads(function(_, cx, cy)
+    -- Stores only the chunk asked for, so every chunk the search enters is read.
+    reads = reads + 1
+    local out = {}
+    for ly = 0, 31 do for lx = 0, 31 do out[#out + 1] = string.char(cell(cx * 32 + lx, cy * 32 + ly)) end end
+    grid.put(1, cx, cy, table.concat(out))
+  end, function()
+    local job = jobs.create{surface_index = 1, force = "player", starts = {{x = 0, y = 1, d = 1}},
+      goal = {x = 90, y = 1, headings = ALL, place = true}, tier = TIER, layout = "belts", placement = "ghost"}
+    local ticks, budget = 0, settings.global["auto-belt-search-budget"].value
+    while job.stage == "refine" and ticks < 10000 do
+      local before, effort = reads, job.effort
+      scheduler.tick()
+      ticks = ticks + 1
+      check(reads - before <= 1, "tick " .. ticks .. " read " .. (reads - before) .. " chunks")
+      -- A read never follows expansions in the same tick.
+      check(job.effort - effort <= math.max(budget, grid.CHUNK_UNITS), "tick " .. ticks .. " used " .. (job.effort - effort))
+    end
+    equal(job.stage, "ready")
+    check(reads >= 3, "the route crossed several chunks: " .. reads)
+  end)
+end)
+
 test("jobs: too many chunk reads fail with search-limit", function()
   local rows = {"..........", "..........", ".........."}
   fresh(rows)
@@ -279,7 +329,8 @@ test("jobs: region builds on a warm cache are charged to the budget", function()
   local job = long_job(5, 5)
   local used = jobs.step(job, 250)
   equal(job.chunk_reads, 0)
-  check(job.region_builds >= 1 and job.region_builds <= 3, "builds within the budget: " .. job.region_builds)
+  local most = math.max(1, math.floor(250 / grid.REGION_UNITS))
+  check(job.region_builds >= 1 and job.region_builds <= most, "builds within the budget: " .. job.region_builds)
   equal(job.effort, used)
   check(job.effort >= job.region_builds * grid.REGION_UNITS, "each build is charged")
   finish(job)
@@ -330,6 +381,58 @@ test("jobs: a refine search stored in the older format starts over with the same
   long.search.x0 = nil
   finish(long)
   equal(long.stage, "ready")
+end)
+
+test("jobs: an abstract search saved with a flat heap starts over", function()
+  fresh(wide(200, 96, 100, 80))
+  local job = long_job(5, 5)
+  jobs.step(job, 3)
+  equal(job.stage, "abstract")
+  -- The previous heap layout: one flat array of keys and one of values.
+  job.abstract.open = {keys = {}, vals = {}, n = 0}
+  finish(job)
+  equal(job.stage, "ready")
+end)
+
+test("jobs: a refine search saved with separate g, parent and closed tables starts over with the same route", function()
+  local rows = {"..........", "....|.....", ".........."}
+  local function make()
+    return jobs.create{surface_index = 1, force = "player", starts = {{x = 0, y = 1, d = 1}},
+      goal = {x = 9, y = 1, headings = ALL, place = true}, tier = TIER, layout = "belts", placement = "ghost"}
+  end
+  fresh(rows)
+  local whole = run(make())
+  local job = make()
+  jobs.step(job, 3)
+  equal(job.stage, "refine")
+  -- The previous layout: box ids, but one table each for g, parent and closed.
+  local s = job.search
+  s.nodes, s.stale_pops, s.pack = nil, nil, nil
+  s.g, s.parent, s.closed = {[refine.state_id(s, 0, 1, 1)] = 0}, {[refine.state_id(s, 0, 1, 1)] = -1}, {}
+  s.open = {keys = {0}, vals = {refine.state_id(s, 0, 1, 1)}, n = 1}
+  run(job)
+  equal(job.stage, "ready"); equal(#job.entities, #whole.entities)
+  for i, e in ipairs(whole.entities) do
+    equal(job.entities[i].x, e.x); equal(job.entities[i].y, e.y); equal(job.entities[i].d, e.d)
+  end
+end)
+
+test("jobs: stale pops are charged to the budget", function()
+  local rows = {}
+  for y = 1, 12 do rows[y] = string.rep(".", 40) end
+  fresh(rows)
+  local job = jobs.create{surface_index = 1, force = "player", starts = {{x = 0, y = 0, d = 1}},
+    goal = {x = 39, y = 11, headings = ALL, place = true}, tier = TIER, layout = "belts", placement = "ghost"}
+  local s = job.search
+  local spent = 0
+  for _ = 1, 10000 do
+    spent = spent + jobs.step(job, 7)
+    if job.stage ~= "refine" then break end
+  end
+  equal(job.stage, "ready")
+  check(s.stale_pops > 0, "the search popped closed states")
+  equal(spent, s.expansions + math.floor(s.stale_pops / refine.STALE_PER_UNIT))
+  equal(job.effort, spent)
 end)
 
 local function budgets(search, build)

@@ -62,6 +62,37 @@ test("heap: pop leaves no stale slots", function()
   local h = heap.new()
   for i = 1, 5 do heap.push(h, i, i * 10) end
   while heap.size(h) > 0 do heap.pop(h) end
-  equal(next(h.keys), nil)
-  equal(next(h.vals), nil)
+  equal(next(h.key_blocks), nil)
+  equal(next(h.val_blocks), nil)
+end)
+
+test("heap: order holds across blocks and empty blocks are dropped", function()
+  local h = heap.new()
+  local n = heap.BLOCK * 2 + 37
+  local seed = 11
+  for i = 1, n do
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    heap.push(h, math.floor(seed / 65536) % 5000, i)
+  end
+  local blocks = 0
+  for _ in pairs(h.key_blocks) do blocks = blocks + 1 end
+  equal(blocks, 3)
+  local last = -1
+  for _ = 1, n - 10 do
+    local key = heap.pop(h)
+    check(key >= last, "keys come out in order")
+    last = key
+  end
+  blocks = 0
+  for _ in pairs(h.key_blocks) do blocks = blocks + 1 end
+  equal(blocks, 1)
+  -- Refill past the dropped blocks, then drain.
+  for i = 1, heap.BLOCK + 3 do heap.push(h, (i * 7919) % 3001, i) end
+  last = -1
+  while heap.size(h) > 0 do
+    local key = heap.pop(h)
+    check(key >= last, "keys come out in order after a refill")
+    last = key
+  end
+  equal(next(h.key_blocks), nil)
 end)

@@ -110,12 +110,13 @@ local function start_refine(job)
   }
 end
 
--- Searches stored by an older version number their nodes differently; they
--- start over from the job's starts and goal.
+-- Searches stored by an older version number or store their nodes
+-- differently; they start over from the job's starts and goal.
 local function upgrade(job)
-  if job.stage == "abstract" and job.abstract and job.abstract.ocx == nil then
+  if job.stage == "abstract" and job.abstract
+    and (job.abstract.ocx == nil or job.abstract.open.key_blocks == nil) then
     job.abstract = abstract_search(job)
-  elseif job.stage == "refine" and job.search and job.search.x0 == nil then
+  elseif job.stage == "refine" and job.search and (job.search.x0 == nil or job.search.nodes == nil) then
     if job.chunks then start_refine(job) else job.search = short_search(job) end
   end
 end
@@ -149,14 +150,21 @@ local function build_regions(job, cx, cy)
   job.region_builds = (job.region_builds or 0) + 1
 end
 
--- Advances the search by up to `budget` units; returns the units used.
-function jobs.step(job, budget)
+-- Advances the search by up to `budget` units; returns the units used. A
+-- chunk read or a region build that does not fit in what is left of the
+-- budget waits for a later call. Only the first work of a job in a tick may
+-- overrun: with `first` (the default), a read that costs more than the whole
+-- budget still happens when it comes before anything else.
+function jobs.step(job, budget, first)
   if not jobs.searching(job) then return 0 end
   upgrade(job)
   local max_effort = settings.global["auto-belt-max-effort"].value
   budget = math.min(budget, max_effort - job.effort)
   if budget <= 0 then fail(job, "auto-belt.search-limit"); return 0 end
   local remaining = budget
+  local function fits(cost)
+    return remaining >= cost or (first ~= false and remaining == budget)
+  end
   while remaining > 0 and jobs.searching(job) do
     if job.stage == "abstract" then
       local status, used = hpa.step(job.abstract, remaining, grid.regions_reader(job.surface_index))
@@ -170,10 +178,12 @@ function jobs.step(job, budget)
       elseif status == "need" then
         local need = job.abstract.need
         if grid.cached(job.surface_index, need.cx, need.cy) then
+          if not fits(grid.REGION_UNITS) then break end
           build_regions(job, need.cx, need.cy)
           remaining = remaining - grid.REGION_UNITS
-        elseif read(job, need.cx, need.cy) then
-          remaining = remaining - grid.CHUNK_UNITS
+        else
+          if not fits(grid.CHUNK_UNITS) then break end
+          if read(job, need.cx, need.cy) then remaining = remaining - grid.CHUNK_UNITS end
         end
       end
     else
@@ -185,6 +195,7 @@ function jobs.step(job, budget)
       elseif status == "failed" then
         refine_failed(job)
       elseif status == "need" then
+        if not fits(grid.CHUNK_UNITS) then break end
         local cx, cy = cells.chunk_of(job.search.need.x, job.search.need.y)
         if read(job, cx, cy) then remaining = remaining - grid.CHUNK_UNITS end
       end

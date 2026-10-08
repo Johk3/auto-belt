@@ -9,6 +9,11 @@ if not s then
 end
 local TIER = AUTO_BELT.tiers.get("transport-belt")
 local ALL = {[0] = true, [1] = true, [2] = true, [3] = true}
+local function restore()
+  if t and t.budget then settings.global["auto-belt-search-budget"] = {value = t.budget} end
+  storage.ab_long = nil
+end
+local function fail(msg) restore(); error(msg) end
 if not t then
   s.request_to_generate_chunks({0, 0}, 24)
   s.force_generate_chunk_requests()
@@ -29,15 +34,16 @@ if not t then
   local job = J.create{surface_index = s.index, force = "player", starts = {{x = 0, y = 360, d = 1}},
     goal = {x = 620, y = 360, headings = ALL, place = true}, tier = TIER, layout = "belts", placement = "free"}
   if job.stage ~= "abstract" then error("long route did not start in the abstract stage: " .. job.stage) end
-  storage.ab_long = {job = job.id, tick = game.tick}
+  storage.ab_long = {job = job.id, tick = game.tick, budget = settings.global["auto-belt-search-budget"].value}
+  settings.global["auto-belt-search-budget"] = {value = 600}
   return "WAIT: routing"
 end
 local job = storage.jobs[t.job]
 if job and J.searching(job) then return "WAIT: routing" end
 if job then
-  if job.stage ~= "ready" then storage.ab_long = nil; error("job ended " .. job.stage .. " " .. tostring(job.error)) end
-  if not (job.chunks and #job.chunks > 0) then storage.ab_long = nil; error("job has no abstract chunk path") end
-  if not (job.chunk_reads and job.chunk_reads > 0) then storage.ab_long = nil; error("abstract stage read no chunks") end
+  if job.stage ~= "ready" then fail("job ended " .. job.stage .. " " .. tostring(job.error)) end
+  if not (job.chunks and #job.chunks > 0) then fail("job has no abstract chunk path") end
+  if not (job.chunk_reads and job.chunk_reads > 0) then fail("abstract stage read no chunks") end
   t.ticks = game.tick - t.tick
   t.entities = job.entities
   t.build = B.start(job).id
@@ -53,7 +59,7 @@ while e and seen < 2000 do
   if e.type == "underground-belt" and e.belt_to_ground_type == "input" then e = e.neighbours
   else e = e.belt_neighbours.outputs[1] end
 end
-storage.ab_long = nil
+restore()
 if not e or e.position.x ~= 620.5 or e.position.y ~= 360.5 then error("belt chain broken after " .. seen .. " entities") end
 if seen ~= #t.entities then error("chain length " .. seen .. " vs entities " .. #t.entities) end
 return "PASS: 620-tile route in " .. t.ticks .. " ticks"

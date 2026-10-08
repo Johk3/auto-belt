@@ -1,74 +1,102 @@
--- Binary min-heap over parallel arrays.
+-- Binary min-heap over parallel arrays of keys and values. Position i lives in
+-- block floor(i / BLOCK), slot i % BLOCK + 1: a long search keeps hundreds of
+-- thousands of entries, and one flat array that doubles at that size stalls the
+-- game for several milliseconds. A block that empties is dropped.
 local heap = {}
 
+local floor = math.floor
+local BLOCK = 4096
+heap.BLOCK = BLOCK
+
 function heap.new()
-  return {keys = {}, vals = {}, n = 0}
+  return {key_blocks = {}, val_blocks = {}, n = 0}
 end
 
 function heap.push(h, key, val)
-  h.n = h.n + 1
-  local i = h.n
-  h.keys[i] = key
-  h.vals[i] = val
-
-  -- Sift up
-  while i > 1 do
-    local parent = math.floor(i / 2)
-    if h.keys[parent] <= key then break end
-    h.keys[i] = h.keys[parent]
-    h.vals[i] = h.vals[parent]
-    i = parent
+  local kb, vb = h.key_blocks, h.val_blocks
+  local i = h.n + 1
+  h.n = i
+  local o = i % BLOCK
+  local b = (i - o) / BLOCK
+  local keys, vals = kb[b], vb[b]
+  if not keys then
+    keys, vals = {}, {}
+    kb[b], vb[b] = keys, vals
   end
-  h.keys[i] = key
-  h.vals[i] = val
+  local slot = o + 1
+
+  -- Sift up; keys, vals and slot locate position i.
+  while i > 1 do
+    local parent = floor(i / 2)
+    local po = parent % BLOCK
+    local pb = (parent - po) / BLOCK
+    local pkeys = kb[pb]
+    local pslot = po + 1
+    local pkey = pkeys[pslot]
+    if pkey <= key then break end
+    local pvals = vb[pb]
+    keys[slot] = pkey
+    vals[slot] = pvals[pslot]
+    i, keys, vals, slot = parent, pkeys, pvals, pslot
+  end
+  keys[slot] = key
+  vals[slot] = val
 end
 
 function heap.peek(h)
   if h.n > 0 then
-    return h.keys[1], h.vals[1]
+    return h.key_blocks[0][2], h.val_blocks[0][2]
   end
   return nil
 end
 
 function heap.pop(h)
-  if h.n == 0 then return nil end
+  local n = h.n
+  if n == 0 then return nil end
+  local kb, vb = h.key_blocks, h.val_blocks
+  local root_keys, root_vals = kb[0], vb[0]
+  local key, val = root_keys[2], root_vals[2]
 
-  local key, val = h.keys[1], h.vals[1]
+  -- Take the last entry out, dropping its block when it empties.
+  local o = n % BLOCK
+  local b = (n - o) / BLOCK
+  local keys, vals = kb[b], vb[b]
+  local last_key, last_val = keys[o + 1], vals[o + 1]
+  keys[o + 1], vals[o + 1] = nil, nil
+  if o == 0 or n == 1 then kb[b], vb[b] = nil, nil end
+  n = n - 1
+  h.n = n
+  if n == 0 then return key, val end
 
-  if h.n == 1 then
-    h.n = 0
-    h.keys[1], h.vals[1] = nil, nil
-    return key, val
-  end
-
-  -- Move last to root and sift down
-  local last_key = h.keys[h.n]
-  local last_val = h.vals[h.n]
-  h.keys[h.n], h.vals[h.n] = nil, nil
-  h.n = h.n - 1
-
-  local i = 1
+  -- Move it to the root and sift down; keys, vals and slot locate position i.
+  local i, slot = 1, 2
+  keys, vals = root_keys, root_vals
   while true do
-    local left = i * 2
-    local right = left + 1
-    if left > h.n then break end
+    local child = i * 2
+    if child > n then break end
 
-    -- Find the smaller child
-    local child = left
-    if right <= h.n and h.keys[right] < h.keys[left] then
-      child = right
+    -- Find the smaller child; child is even, so child + 1 shares its block.
+    local co = child % BLOCK
+    local cb = (child - co) / BLOCK
+    local ckeys = kb[cb]
+    local cslot = co + 1
+    local ckey = ckeys[cslot]
+    if child < n then
+      local rkey = ckeys[cslot + 1]
+      if rkey < ckey then child, cslot, ckey = child + 1, cslot + 1, rkey end
     end
 
     -- If child >= last_key, heap property is satisfied
-    if h.keys[child] >= last_key then break end
+    if ckey >= last_key then break end
 
     -- Move child up
-    h.keys[i] = h.keys[child]
-    h.vals[i] = h.vals[child]
-    i = child
+    local cvals = vb[cb]
+    keys[slot] = ckey
+    vals[slot] = cvals[cslot]
+    i, keys, vals, slot = child, ckeys, cvals, cslot
   end
-  h.keys[i] = last_key
-  h.vals[i] = last_val
+  keys[slot] = last_key
+  vals[slot] = last_val
 
   return key, val
 end

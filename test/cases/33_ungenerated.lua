@@ -9,6 +9,10 @@ if not s then
 end
 local TIER = AUTO_BELT.tiers.get("transport-belt")
 local ALL = {[0] = true, [1] = true, [2] = true, [3] = true}
+local function restore()
+  if t and t.budget then settings.global["auto-belt-search-budget"] = {value = t.budget} end
+  storage.ab_ungen = nil
+end
 local function in_band(x, y)
   local cx, cy = math.floor(x / 32), math.floor(y / 32)
   return cx >= 6 and cx <= 24 and cy >= -100 and cy <= -94
@@ -33,15 +37,16 @@ if not t then
   storage.grid = nil
   local job = J.create{surface_index = s.index, force = "player", starts = {{x = 16, y = -3090, d = 1}},
     goal = {x = 976, y = -3090, headings = ALL, place = true}, tier = TIER, layout = "belts", placement = "free"}
-  storage.ab_ungen = {job = job.id, tick = game.tick}
+  storage.ab_ungen = {job = job.id, tick = game.tick, budget = settings.global["auto-belt-search-budget"].value}
+  settings.global["auto-belt-search-budget"] = {value = 600}
   return "WAIT: routing"
 end
 local job = storage.jobs[t.job]
 if job and J.searching(job) then
-  if game.tick - t.tick > 3000 then storage.ab_ungen = nil; error("job still searching after 3000 ticks, stage " .. job.stage) end
+  if game.tick - t.tick > 3000 then restore(); error("job still searching after 3000 ticks, stage " .. job.stage) end
   return "WAIT: routing"
 end
-storage.ab_ungen = nil
+restore()
 if not job then error("job gone") end
 local stage, key, ticks, reads = job.stage, job.error, game.tick - t.tick, job.chunk_reads
 local entities = job.entities

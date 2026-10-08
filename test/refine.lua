@@ -344,7 +344,7 @@ test("refine: weight 1.0 matches the exhaustive search when a turn is forced ear
     local s = fake.solve(cell, params(rows, {{x = 3, y = 0, d = 0}}, {x = 4, y = 4, headings = ALL, place = true}, {weight10 = w}))
     equal(s.status, "found")
     local last = s.result[#s.result]
-    return s, s.g[refine_module.state_id(s, last.x, last.y, last.d)]
+    return s, refine_module.cost(s, last.x, last.y, last.d)
   end
   local exact, exact_cost = solve(0)
   local fast, fast_cost = solve(10)
@@ -369,12 +369,12 @@ local LIMIT = 2147483648 -- 2^31
 -- Every state id the search holds, checked against the bound and the box.
 local function check_ids(s)
   local n = 0
-  for id in pairs(s.g) do
+  refine_module.each_state(s, function(id)
     n = n + 1
     check(id >= 0 and id < LIMIT and id % 1 == 0, "id out of range: " .. tostring(id))
     local x, y, d = refine_module.decode(s, id)
     equal(refine_module.state_id(s, x, y, d), id, "round trip")
-  end
+  end)
   return n
 end
 

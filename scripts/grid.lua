@@ -6,13 +6,19 @@ local regions = require("scripts.regions")
 
 local grid = {}
 
-grid.CHUNK_UNITS = 300
-grid.REGION_UNITS = 100 -- one regions.build, charged to the search budget
+-- Budget units of one chunk read and one regions.build, measured against one
+-- search unit (an expansion, or refine.STALE_PER_UNIT stale heap pops) with
+-- test/bench.sh: a read of a chunk holding belt lines takes about 64 units, a
+-- region build about 21.
+grid.CHUNK_UNITS = 64
+grid.REGION_UNITS = 21
 grid.MARGIN = 11
 grid.CAP = 2048
 
 local floor, ceil, bor = math.floor, math.ceil, bit32.bor
 local band = bit32.band
+local char, unpack = string.char, table.unpack or unpack
+local WALL, THIN = cells.WALL, cells.THIN
 
 local IGNORE = {character = true, car = true, ["spider-vehicle"] = true, unit = true,
   ["item-entity"] = true, corpse = true, ["character-corpse"] = true}
@@ -177,6 +183,9 @@ end
 
 -- Chunk reading (engine only) -------------------------------------------
 
+-- Cell bits of the chunk plus its margin, W * W entries from index 0.
+local scratch = {}
+
 local function layer_names()
   local proto = prototypes.entity["transport-belt"]
   local mask = proto and proto.collision_mask
@@ -212,7 +221,9 @@ function grid.read_chunk(surface, cx, cy)
   local M = grid.MARGIN
   local W = 32 + 2 * M
   local x0, y0 = cx * 32 - M, cy * 32 - M
-  local m = {}
+  -- The scratch table is reset here and read only within this call; reusing
+  -- it avoids growing a fresh table of W * W entries on every read.
+  local m = scratch
   for i = 0, W * W - 1 do m[i] = 0 end
   local function mark(x, y, bit)
     local lx, ly = x - x0, y - y0
@@ -235,12 +246,10 @@ function grid.read_chunk(surface, cx, cy)
   for _, e in pairs(surface.find_entities_filtered{area = area, type = "entity-ghost"}) do
     found[#found + 1] = e
   end
-  local seen = {}
   for _, e in pairs(found) do
     local ghost = e.type == "entity-ghost"
     local etype = ghost and e.ghost_type or e.type
-    if not IGNORE[etype] and not seen[e] then
-      seen[e] = true
+    if not IGNORE[etype] then
       local lx, ly, rx, ry = box_of(e)
       for x = lx, rx do
         for y = ly, ry do mark(x, y, cells.BLOCKED) end
@@ -279,36 +288,43 @@ function grid.read_chunk(surface, cx, cy)
     end
   end
 
+  -- THIN: a blocked tile whose blocked run along its row or its column is at
+  -- most `gap` tiles. A run touching the scratch edge counts as long. Each row
+  -- and column through the chunk is scanned once. BLOCKED is bit 0, so
+  -- `v % 2 == 1` tests it without a bit32 call.
   local gap = tiers.longest_gap()
-  local function blocked(x, y) return band(m[y * W + x], cells.BLOCKED) ~= 0 end
-  -- Length of the blocked run through (x, y) along one axis; a run touching the
-  -- scratch edge counts as long.
-  local function run(x, y, dx, dy)
-    local n = 1
-    for sign = -1, 1, 2 do
-      local cx2, cy2 = x + dx * sign, y + dy * sign
-      while true do
-        if cx2 < 0 or cx2 >= W or cy2 < 0 or cy2 >= W then return math.huge end
-        if not blocked(cx2, cy2) then break end
-        n = n + 1
-        cx2, cy2 = cx2 + dx * sign, cy2 + dy * sign
-      end
-    end
-    return n
-  end
-
-  local out = {}
-  for ly = 0, 31 do
-    for lx = 0, 31 do
-      local sx, sy = lx + M, ly + M
-      local v = m[sy * W + sx]
-      if band(v, cells.BLOCKED) ~= 0 and band(v, cells.WALL) == 0 then
-        if run(sx, sy, 1, 0) <= gap or run(sx, sy, 0, 1) <= gap then
-          v = bor(v, cells.THIN)
+  local thin = {}
+  local last = W - 1
+  for line = M, M + 31 do
+    for axis = 0, 1 do
+      -- axis 0 scans row `line` (step 1), axis 1 scans column `line` (step W).
+      local base, step = axis == 0 and line * W or line, axis == 0 and 1 or W
+      local a = 0
+      while a <= last do
+        if m[base + a * step] % 2 == 1 then
+          local b = a
+          while b < last and m[base + (b + 1) * step] % 2 == 1 do b = b + 1 end
+          if a > 0 and b < last and b - a + 1 <= gap then
+            for k = a, b do thin[base + k * step] = true end
+          end
+          a = b + 1
+        else
+          a = a + 1
         end
       end
-      out[ly * 32 + lx + 1] = string.char(v)
     end
+  end
+
+  local out, bytes = {}, {}
+  for ly = 0, 31 do
+    local row = (ly + M) * W + M
+    for lx = 0, 31 do
+      local i = row + lx
+      local v = m[i]
+      if thin[i] and band(v, WALL) == 0 then v = bor(v, THIN) end
+      bytes[lx + 1] = v
+    end
+    out[ly + 1] = char(unpack(bytes, 1, 32))
   end
   local record = grid.put(surface.index, cx, cy, table.concat(out))
   grid.evict(record)
