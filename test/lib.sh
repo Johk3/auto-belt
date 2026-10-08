@@ -12,6 +12,7 @@ PORT=34199
 export AB_RCON_PORT=27017
 export AB_RCON_PW=autobelt
 SERVER_PID=""
+PACKAGE_PATH=""
 
 setup_sandbox() {
   if [ ! -x "$FACTORIO" ]; then
@@ -21,7 +22,39 @@ setup_sandbox() {
   fi
   # game.server_save() fails on a fresh checkout without the saves directory.
   mkdir -p "$WORK" "$MODS" "$WORK/saves"
-  ln -sfn "$ROOT" "$MODS/auto-belt"
+  trap stop_server EXIT
+  # A second installed version can silently take precedence over the test target.
+  local entry
+  for entry in "$MODS"/auto-belt "$MODS"/auto-belt_*; do
+    if [ -L "$entry" ] || [[ "$entry" == *.zip && -f "$entry" ]]; then
+      rm -f "$entry"
+    elif [ -e "$entry" ]; then
+      echo "Conflicting unpacked test mod: $entry" >&2
+      return 1
+    fi
+  done
+  if [ -n "${AB_TEST_ZIP:-}" ]; then
+    local package_name
+    package_name="$(python3 - "$AB_TEST_ZIP" <<'PYZIP'
+import json, re, sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    infos = [name for name in archive.namelist() if name.endswith("/info.json")]
+    assert len(infos) == 1, "expected one mod info.json"
+    info = json.loads(archive.read(infos[0]))
+    assert info["name"] == "auto-belt"
+    assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", info["version"])
+    name = "auto-belt_" + info["version"]
+    assert infos[0] == name + "/info.json"
+    assert all(path.startswith(name + "/") for path in archive.namelist())
+    assert archive.testzip() is None
+    print(name + ".zip")
+PYZIP
+)"
+    PACKAGE_PATH="$MODS/$package_name"
+    cp -- "$AB_TEST_ZIP" "$PACKAGE_PATH"
+  else
+    ln -sfn "$ROOT" "$MODS/auto-belt"
+  fi
   cat > "$WORK/config.ini" <<EOF
 [path]
 read-data=__PATH__executable__/../../data
@@ -70,10 +103,27 @@ stop_server() {
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
   wait "$SERVER_PID" 2>/dev/null || true
   SERVER_PID=""
+  if [ -n "$PACKAGE_PATH" ]; then
+    rm -f "$PACKAGE_PATH"
+    PACKAGE_PATH=""
+  fi
+  if [ -d "$MODS" ] && [ ! -e "$MODS/auto-belt" ]; then
+    ln -sfn "$ROOT" "$MODS/auto-belt"
+  fi
 }
 
 mod_version() {
-  python3 -c "import json; print(json.load(open('$ROOT/info.json'))['version'])"
+  python3 - "$ROOT/info.json" "$PACKAGE_PATH" <<'PYVERSION'
+import json, sys, zipfile
+if sys.argv[2]:
+    with zipfile.ZipFile(sys.argv[2]) as archive:
+        name = next(name for name in archive.namelist() if name.endswith("/info.json"))
+        info = json.loads(archive.read(name))
+else:
+    with open(sys.argv[1]) as source:
+        info = json.load(source)
+print(info["version"])
+PYVERSION
 }
 
 # run_case <file> -> prints PASS/FAIL line, returns 0/1
